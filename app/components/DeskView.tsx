@@ -209,12 +209,27 @@ export function DeskView() {
         if (cancelled) return;
         setSemanticIndexed(status);
         if (status.cached < status.total) {
-          await indexNotesInBackground(notes, {
+          const result = await indexNotesInBackground(notes, {
             onProgress: (cached: number, total: number) => {
               if (!cancelled) setSemanticIndexed({ cached, total });
             },
           });
-          if (!cancelled) setSemanticIndexed(await semanticIndexStatus(notes));
+          if (cancelled) return;
+          setSemanticIndexed(await semanticIndexStatus(notes));
+          // Android 首启：模型部署（assets→数据目录）可能在页面加载后完成，
+          // 失败后 30s 重试一次，避免首次启动永远缺索引
+          if (result.failed) {
+            window.setTimeout(() => {
+              if (cancelled) return;
+              void indexNotesInBackground(notes, {
+                onProgress: (cached: number, total: number) => {
+                  if (!cancelled) setSemanticIndexed({ cached, total });
+                },
+              }).then(() => {
+                if (!cancelled) void semanticIndexStatus(notes).then(setSemanticIndexed);
+              });
+            }, 30_000);
+          }
         }
       } catch {
         // model unavailable — TF-IDF search remains the fallback

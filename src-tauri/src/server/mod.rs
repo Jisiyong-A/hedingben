@@ -74,6 +74,7 @@ fn build_router(state: ServerState) -> Router {
         .route("/notes/{note_id}", delete(handle_delete))
         .route("/notes/{note_id}/ocr", post(handle_ocr_update))
         .route("/media/{note_id}/{file}", get(handle_media))
+        .route("/models/{*path}", get(handle_models))
         .fallback(handle_not_found)
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -612,6 +613,46 @@ async fn handle_not_found() -> Response {
     error_json(StatusCode::NOT_FOUND, "Not found")
 }
 
+/// GET /models/{path} —— 语义模型文件服务（Android：前端 transformers.js
+/// 以本地模式从 <data>/models 加载；桌面走 Rust 内嵌 assets，不经此路由）。
+/// 路径白名单：仅相对路径、禁止 .. 越界。
+async fn handle_models(
+    State(state): State<ServerState>,
+    Path(path): Path<String>,
+) -> Response {
+    let normalized = path.replace('\\', "/");
+    if normalized.contains("..") || normalized.starts_with('/') {
+        return error_json(StatusCode::BAD_REQUEST, "Invalid model path");
+    }
+    let file_path = state.data_directory.join("models").join(&normalized);
+    let metadata = match tokio::fs::metadata(&file_path).await {
+        Ok(metadata) => metadata,
+        Err(_) => return error_json(StatusCode::NOT_FOUND, "Model file not found"),
+    };
+    if !metadata.is_file() {
+        return error_json(StatusCode::NOT_FOUND, "Model file not found");
+    }
+    let content_type = match file_path.extension().and_then(|ext| ext.to_str()) {
+        Some("json") => "application/json",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("mjs") | Some("js") => "text/javascript",
+        Some("wasm") => "application/wasm",
+        Some("onnx") => "application/octet-stream",
+        _ => "application/octet-stream",
+    };
+    let file = match tokio::fs::File::open(&file_path).await {
+        Ok(file) => file,
+        Err(_) => return error_json(StatusCode::NOT_FOUND, "Model file not found"),
+    };
+    let stream = tokio_util::io::ReaderStream::with_capacity(file, 256 * 1024);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, metadata.len())
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "模型文件读取失败"))
+}
+
 #[cfg(test)]
 mod integration_tests {
     use super::*;
@@ -791,6 +832,73 @@ mod integration_tests {
         let missing = client
             .post("http://127.0.0.1:24321/notes/fedcba9876543210fedcba/ocr")
             .json(&ocr_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn models_route_serves_and_guards() {
+        let dir = spawn_server("models", 24322).await;
+        let client = reqwest::Client::new();
+
+        // 造一个模型文件
+        let models_dir = dir.join("models/multilingual-e5-base/onnx");
+        std::fs::create_dir_all(&models_dir).unwrap();
+        let payload = (0..1024).map(|i| (i % 251) as u8).collect::<Vec<u8>>();
+        std::fs::write(models_dir.join("model_quantized.onnx"), &payload).unwrap();
+        std::fs::write(dir.join("models/multilingual-e5-base/config.json"), r#"{"model_type":"xlm-roberta"}"#).unwrap();
+
+        // 正常读取
+        let resp = client
+            .get("http://127.0.0.1:24322/models/multilingual-e5-base/onnx/model_quantized.onnx")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()[header::CONTENT_TYPE], "application/octet-stream");
+        assert_eq!(resp.bytes().await.unwrap().len(), 1024);
+
+        let resp = client
+            .get("http://127.0.0.1:24322/models/multilingual-e5-base/config.json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()[header::CONTENT_TYPE], "application/json");
+
+        // ES module glue：必须返回 text/javascript（动态 import 依赖正确 MIME）
+        std::fs::write(
+            dir.join("models/multilingual-e5-base/ort-wasm-simd-threaded.asyncify.mjs"),
+            "export const x = 1;",
+        )
+        .unwrap();
+        let resp = client
+            .get("http://127.0.0.1:24322/models/multilingual-e5-base/ort-wasm-simd-threaded.asyncify.mjs")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()[header::CONTENT_TYPE], "text/javascript");
+
+        // 路径穿越防护（axum 可能提前规范化 .. 段 → 400 或 404 均算拒绝）
+        let traversal = client
+            .get("http://127.0.0.1:24322/models/../notes.json")
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            traversal.status() == StatusCode::BAD_REQUEST || traversal.status() == StatusCode::NOT_FOUND,
+            "traversal should be rejected, got {}",
+            traversal.status()
+        );
+
+        // 不存在 → 404
+        let missing = client
+            .get("http://127.0.0.1:24322/models/nope/model.onnx")
             .send()
             .await
             .unwrap();

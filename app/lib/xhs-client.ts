@@ -77,7 +77,9 @@ const CONFIGURED_LOCAL_API_BASE_URL = (process.env.NEXT_PUBLIC_LOCAL_API_BASE_UR
   .trim()
   .replace(/\/+$/, '');
 export const LOCAL_API_BASE_URL = CONFIGURED_LOCAL_API_BASE_URL || DEFAULT_LOCAL_API_BASE_URL;
-const LOCAL_API_TIMEOUT_MS = 2500;
+// Android 慢设备/首启模型部署期 IO 竞争：2.5s 太紧导致轮询持续 AbortError。
+// 健康/列表轮询用 8s（仍远小于 2s 轮询间隔的感知延迟）；导入等长操作单独传超时。
+const LOCAL_API_TIMEOUT_MS = 8000;
 
 async function fetchLocalApi<T>(path: string, init?: RequestInit, timeoutMs: number = LOCAL_API_TIMEOUT_MS): Promise<T> {
   const headers = new Headers(init?.headers);

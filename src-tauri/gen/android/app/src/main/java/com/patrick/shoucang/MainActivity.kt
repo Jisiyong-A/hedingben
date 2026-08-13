@@ -28,6 +28,8 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // 语义模型部署（~282MB assets → 数据目录）放后台线程，避免阻塞主线程导致 ANR
+    Thread { ModelDeployer.ensure(applicationContext) }.start()
     captureShare(intent)
   }
 

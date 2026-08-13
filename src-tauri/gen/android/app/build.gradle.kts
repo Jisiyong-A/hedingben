@@ -51,6 +51,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    androidResources {
+        // 语义模型不打压缩（已量化，压缩收益低且拖慢构建/安装）
+        noCompress += listOf("onnx", "json", "txt")
+    }
 }
 
 rust {

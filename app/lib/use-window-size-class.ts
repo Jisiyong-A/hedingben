@@ -18,8 +18,12 @@ export function useWindowSizeClass(): WindowSizeClass {
 
   useEffect(() => {
     const update = () => {
+      // Android WebView 中 innerWidth 是物理 CSS px（≈ dpr × dp），screen.width
+      // 才是 dp 值；用二者较小值得到真实的密度无关宽度，避免手机被误判为
+      // expanded（>840）而渲染桌面双栏布局。
       const w = window.innerWidth;
-      setWc(w < 600 ? 'compact' : w < 840 ? 'medium' : 'expanded');
+      const dp = Math.min(w, typeof screen !== 'undefined' ? screen.width : w) || (w / (window.devicePixelRatio || 1));
+      setWc(dp < 600 ? 'compact' : dp < 840 ? 'medium' : 'expanded');
     };
     update();
     window.addEventListener('resize', update);

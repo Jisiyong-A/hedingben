@@ -13,10 +13,26 @@
  * - Degradation: if the model/WASM fails to load, the caller falls back
  *   to the TF-IDF search already in place.
  */
-import { env, pipeline } from '@huggingface/transformers';
+import { env, AutoModel, XLMRobertaTokenizer } from '@huggingface/transformers';
 
+// Android：模型经 Rust sidecar 提供（<data>/models，首启从 assets 部署）；
+// 桌面：Tauri 内嵌 assets 提供 /models/。以 OcrBridge 是否存在区分平台。
+const isAndroid = typeof window !== 'undefined' && Boolean(window.OcrBridge);
 env.allowLocalModels = true;
-env.localModelPath = '/models/';
+// 完全离线：本地模型文件齐全，禁止 HF 远程请求 —— 避免 metadata 拉取失败
+// 干扰 tokenizer/pipeline 构造（此前 embed 报 this.tokenizer is not a function）
+env.allowRemoteModels = false;
+// WebView 的 Cache API 对 16MB tokenizer.json 的 put 可能失败/超时，导致
+// tokenizer 构造异常（Tokenizer must be a valid object）→ 禁用浏览器缓存
+env.useBrowserCache = false;
+env.useWasmCache = false;
+env.localModelPath = isAndroid ? 'http://127.0.0.1:4318/models/' : '/models/';
+// ONNX Runtime WASM 与模型同目录本地加载（WebView 无 SAB/WebGPU → asyncify 变体，
+// 由 android-assets.cjs 以固定名复制；桌面 /models/ 内嵌同文件）
+if (env.backends?.onnx) {
+  env.backends.onnx.wasm ??= {};
+  env.backends.onnx.wasm.wasmPaths = env.localModelPath;
+}
 
 const MODEL_ID = 'multilingual-e5-base';
 const EMBEDDING_DIM = 768;
@@ -48,10 +64,27 @@ function openCacheDb() {
 
 async function getEmbedder() {
   if (!embedderPromise) {
-    embedderPromise = pipeline('feature-extraction', MODEL_ID).catch((error) => {
-      embedderPromise = null;
-      throw error;
-    });
+    // eslint-disable-next-line no-console
+    console.log('[semantic] loading model', MODEL_ID, 'localPath=', env.localModelPath, 'wasm=', JSON.stringify(env.backends?.onnx?.wasm?.wasmPaths ?? null));
+    // 不用 pipeline：4.2.0 在 WebView 里 pipeline 内部 tokenizer 未函数化
+    // （this.tokenizer is not a function）。改用 AutoModel + AutoTokenizer 手动
+    // 组装，tokenizer 调用兼容函数化/对象两种形态。
+    embedderPromise = Promise.all([
+      AutoModel.from_pretrained(MODEL_ID, { quantized: true }),
+      // 用具体 tokenizer 类（XLMRoberta）而非 AutoTokenizer：离线模式下
+      // AutoTokenizer 依赖 hub metadata 解析 tokenizer_class（被禁后 config 为 undefined）
+      XLMRobertaTokenizer.from_pretrained(MODEL_ID),
+    ]).then(
+      ([model, tokenizer]) => {
+        console.log('[semantic] model+tokenizer loaded', 'tokenizerType=', typeof tokenizer);
+        return { model, tokenizer };
+      },
+      (err) => {
+        console.error('[semantic] model load FAILED:', String((err && err.message) || err).slice(0, 300));
+        embedderPromise = null;
+        throw err;
+      },
+    );
   }
   return embedderPromise;
 }
@@ -78,12 +111,32 @@ function normalizeEmbedding(output) {
  *  e5 models use role prefixes: 'query: ' for search input,
  *  'passage: ' for indexed documents. */
 export async function embedText(text, role = 'query') {
-  const embedder = await getEmbedder();
+  const { model, tokenizer } = await getEmbedder();
   const prefix = role === 'passage' ? 'passage: ' : 'query: ';
   const truncated = String(text || '').slice(0, 800);
   if (!truncated.trim()) return null;
-  const output = await embedder(prefix + truncated, { pooling: 'none', normalize: false });
-  return normalizeEmbedding(output);
+  // eslint-disable-next-line no-console
+  console.log('[semantic] embedding', role, truncated.slice(0, 30));
+  try {
+    // tokenizer 调用兼容函数化/对象两种形态（4.2.0 在 WebView 中可能非函数）
+    const tokenizeFn = typeof tokenizer === 'function'
+      ? (input, opts) => tokenizer(input, opts)
+      : (input, opts) => tokenizer._call(input, opts);
+    const inputs = await tokenizeFn(prefix + truncated, {
+      padding: true,
+      truncation: true,
+      max_length: 512,
+      return_tensor: 'pt',
+    });
+    const output = await model(inputs, { pooling: 'none' });
+    // eslint-disable-next-line no-console
+    console.log('[semantic] embed output dims', JSON.stringify(output.dims), 'len', output.data.length);
+    return normalizeEmbedding(output);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[semantic] embed FAILED:', String((err && err.message) || err).slice(0, 300));
+    throw err;
+  }
 }
 
 export async function getCachedVector(noteId) {

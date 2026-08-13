@@ -80,7 +80,7 @@ adb forward tcp:14318 tcp:4318; Invoke-RestMethod http://127.0.0.1:14318/health
 ### Android 已知限制（后续 Phase）
 
 - OCR：**已接入**（ML Kit Text Recognition v2 bundled 中文，`OcrBridge.kt` 异步 submit/poll + `POST /notes/{id}/ocr` 回写，模拟器验证中文识别通过，不阻塞页面）；首次识别需 ~4s 模型加载（已缓存）
-- 语义模型 WASM 未内置（public/models 未下载；Android WebView 内存需验证）
+- 语义模型 WASM：**内置完成**（e5-base int8 282MB：模型部署 assets→数据目录、`GET /models/{path}` 路由、onnxruntime asyncify wasm 本地化、CSP script-src/unsafe-eval 放行）；**WebView 推理受限**：transformers.js 4.2.0 在 WebView 的 tokenizer 构造失败（Node 正常，库级兼容问题，已尝试 pipeline/AutoTokenizer/XLMRobertaTokenizer/useBrowserCache 禁用均未解决）→ TF-IDF 兜底搜索工作
 - AI 分类（deepseek-v4-flash）未移植（规则分类已工作，见 `server/category.rs`）
 - 真实 XHS 链接解析/媒体下载未在真机验证（需网络 + 真机）
 
