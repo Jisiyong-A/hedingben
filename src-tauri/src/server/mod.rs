@@ -72,6 +72,7 @@ fn build_router(state: ServerState) -> Router {
         .route("/notes", get(handle_notes))
         .route("/notes/import", post(handle_import))
         .route("/notes/{note_id}", delete(handle_delete))
+        .route("/notes/{note_id}/ocr", post(handle_ocr_update))
         .route("/media/{note_id}/{file}", get(handle_media))
         .fallback(handle_not_found)
         .layer(middleware::from_fn_with_state(
@@ -272,16 +273,24 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
 // ---------- 处理器 ----------
 
 async fn handle_health(State(state): State<ServerState>) -> Response {
+    // Android 端 OCR 由 Kotlin ML Kit bridge 提供（OcrBridge），内置可用
+    let local_ocr = cfg!(target_os = "android");
+    let engine = if local_ocr { Some("mlkit-text-v2") } else { None };
+    let languages: Vec<&str> = if local_ocr {
+        vec!["zh-Hans", "zh-Hant", "en"]
+    } else {
+        Vec::new()
+    };
     ok_json(json!({
         "ok": true,
         "port": DEFAULT_PORT,
         "platform": "android",
         "dataDirectory": state.data_directory.to_string_lossy(),
-        "localOcr": false,
+        "localOcr": local_ocr,
         "ocr": {
-            "engine": null,
-            "available": false,
-            "languages": [],
+            "engine": engine,
+            "available": local_ocr,
+            "languages": languages,
             "error": null,
         },
     }))
@@ -409,8 +418,47 @@ async fn resolve_via_input(input: &str) -> Result<Value, String> {
     }
 }
 
-async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<String>) -> Response {
+/// POST /notes/{id}/ocr —— Android 端 ML Kit OCR 结果回写（Kotlin bridge → 前端编排）。
+/// body: { imageOcr: [{imageUrl, text, error}], ocrText: string, ocrEngine?: string }
+async fn handle_ocr_update(
+    State(state): State<ServerState>,
+    Path(note_id): Path<String>,
+    body: Bytes,
+) -> Response {
     let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
+    let note_id = note_id.to_ascii_lowercase();
+    if !id_pattern.is_match(&note_id) {
+        return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
+    }
+    let parsed = match read_json_body(body).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let image_ocr = parsed.get("imageOcr").cloned().unwrap_or(Value::Array(Vec::new()));
+    let ocr_text = parsed["ocrText"].as_str().unwrap_or("").to_string();
+    if !image_ocr.is_array() {
+        return error_json(StatusCode::BAD_REQUEST, "imageOcr 必须是数组");
+    }
+
+    let mut notes = read_notes(&state).await;
+    let target = notes.iter_mut().find(|note| note["id"].as_str() == Some(note_id.as_str()));
+    let Some(target) = target else {
+        return error_json(StatusCode::NOT_FOUND, "笔记不存在或已被删除");
+    };
+
+    target["imageOcr"] = image_ocr;
+    target["ocrText"] = Value::String(ocr_text);
+    target["ocrEngine"] = Value::String("mlkit-text-v2".to_string());
+    target["ocrEngineVersion"] = Value::String("mlkit-16.0.1".to_string());
+    target["ocrProcessedAt"] = Value::String(note_import::chrono_now_iso_public());
+
+    if let Err(message) = write_notes(&state, &Value::Array(notes)).await {
+        return error_json(StatusCode::INTERNAL_SERVER_ERROR, &message);
+    }
+    ok_json(json!({"ok": true, "noteId": note_id}))
+}
+
+async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<String>) -> Response {    let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
     let note_id = note_id.to_ascii_lowercase();
     if !id_pattern.is_match(&note_id) {
         return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
@@ -688,6 +736,65 @@ mod integration_tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn ocr_update_roundtrip() {
+        let dir = spawn_server("ocr", 24321).await;
+        let client = reqwest::Client::new();
+
+        // 先导入一条（无媒体）
+        let payload = json!({
+            "note": {
+                "sourceUrl": "https://www.xiaohongshu.com/explore/abcdef0123456789abcdef",
+                "title": "OCR 测试",
+                "content": "用于 OCR 回写测试的正文",
+                "imageUrls": [],
+            }
+        });
+        client
+            .post("http://127.0.0.1:24321/notes/import")
+            .json(&payload)
+            .send()
+            .await
+            .unwrap();
+
+        // OCR 回写
+        let ocr_body = json!({
+            "imageOcr": [
+                { "imageUrl": "http://127.0.0.1:4318/media/abcdef0123456789abcdef/01.webp", "text": "图内文字甲", "error": "" },
+                { "imageUrl": "http://127.0.0.1:4318/media/abcdef0123456789abcdef/02.webp", "text": "", "error": "识别失败" }
+            ],
+            "ocrText": "图内文字甲"
+        });
+        let resp = client
+            .post("http://127.0.0.1:24321/notes/abcdef0123456789abcdef/ocr")
+            .json(&ocr_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // 验证 notes.json 落盘
+        let notes_file = dir.join("notes.json");
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&notes_file).unwrap()).unwrap();
+        let note = &stored.as_array().unwrap()[0];
+        assert_eq!(note["ocrText"], "图内文字甲");
+        assert_eq!(note["ocrEngine"], "mlkit-text-v2");
+        assert_eq!(note["imageOcr"].as_array().unwrap().len(), 2);
+        assert_eq!(note["imageOcr"][0]["text"], "图内文字甲");
+
+        // 不存在的笔记 → 404
+        let missing = client
+            .post("http://127.0.0.1:24321/notes/fedcba9876543210fedcba/ocr")
+            .json(&ocr_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 
         std::fs::remove_dir_all(&dir).ok();
     }

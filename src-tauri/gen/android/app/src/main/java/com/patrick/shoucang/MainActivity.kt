@@ -59,6 +59,7 @@ class MainActivity : TauriActivity() {
     val rustWebView = webView as RustWebView
     activeWebView = rustWebView
     rustWebView.addJavascriptInterface(ShareBridge(), "ShoucangShareBridge")
+    rustWebView.addJavascriptInterface(OcrBridge(this), "OcrBridge")
     android.util.Log.i("ShoucangShare", "onWebViewCreate: bridge registered, pending=${pendingShare != null}")
     pendingShare?.let { text ->
       webView.post {

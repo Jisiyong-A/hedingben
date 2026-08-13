@@ -1,4 +1,5 @@
 import { importSharedNote } from './xhs-client';
+import { runAndroidOcr } from './android-ocr';
 
 declare global {
   interface Window {
@@ -22,7 +23,8 @@ export function registerShareReceive(onImported: () => void, onError: (message: 
     if (!trimmed) return;
     void (async () => {
       try {
-        await importSharedNote(trimmed);
+        const result = await importSharedNote(trimmed);
+        void runAndroidOcr(result.note);
         onImported();
       } catch (error) {
         onError(error instanceof Error ? error.message : '导入失败');

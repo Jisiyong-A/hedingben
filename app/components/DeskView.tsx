@@ -18,6 +18,7 @@ import {
   importSharedNote,
   openBrowserExtensionSetup,
 } from '../lib/xhs-client';
+import { runAndroidOcr } from '../lib/android-ocr';
 import type { AgentClient, LocalServiceHealth, LocalSetupInfo } from '../lib/xhs-client';
 import {
   acceptsExternalNoteDrag,
@@ -361,6 +362,8 @@ export function DeskView() {
       const result = await importSharedNote(input);
       clearStepTimers();
       setNotes(result.notes);
+      // Android：导入成功后异步补 ML Kit OCR（桌面 no-op）
+      void runAndroidOcr(result.note);
       setImportFeedback({
         phase: 'complete',
         step: 'index',

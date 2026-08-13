@@ -76,7 +76,7 @@ const DEFAULT_LOCAL_API_BASE_URL = 'http://127.0.0.1:4318';
 const CONFIGURED_LOCAL_API_BASE_URL = (process.env.NEXT_PUBLIC_LOCAL_API_BASE_URL || '')
   .trim()
   .replace(/\/+$/, '');
-const LOCAL_API_BASE_URL = CONFIGURED_LOCAL_API_BASE_URL || DEFAULT_LOCAL_API_BASE_URL;
+export const LOCAL_API_BASE_URL = CONFIGURED_LOCAL_API_BASE_URL || DEFAULT_LOCAL_API_BASE_URL;
 const LOCAL_API_TIMEOUT_MS = 2500;
 
 async function fetchLocalApi<T>(path: string, init?: RequestInit, timeoutMs: number = LOCAL_API_TIMEOUT_MS): Promise<T> {

@@ -79,7 +79,7 @@ adb forward tcp:14318 tcp:4318; Invoke-RestMethod http://127.0.0.1:14318/health
 
 ### Android 已知限制（后续 Phase）
 
-- OCR 未接（/health 返回 localOcr:false；方案：ML Kit Text Recognition，Kotlin bridge）
+- OCR：**已接入**（ML Kit Text Recognition v2 bundled 中文，`OcrBridge.kt` + `POST /notes/{id}/ocr` 回写，模拟器验证中文识别通过）；首次识别需 ~4s 模型加载（已缓存）
 - 语义模型 WASM 未内置（public/models 未下载；Android WebView 内存需验证）
 - AI 分类（deepseek-v4-flash）未移植（规则分类已工作，见 `server/category.rs`）
 - 真实 XHS 链接解析/媒体下载未在真机验证（需网络 + 真机）
