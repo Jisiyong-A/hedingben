@@ -176,7 +176,19 @@ export function DeskView() {
   };
 
   useEffect(() => {
+    // 启动竞态兜底：Rust sidecar 线程与 WebView 加载并行，挂载时可能尚未就绪。
+    // 失败后重试几次（500ms / 1.5s / 4s），避免健康状态永久停在 DOWN。
     void loadLocalStatus();
+    let attempts = 0;
+    const retryTimer = window.setInterval(() => {
+      attempts += 1;
+      if (attempts > 8) {
+        window.clearInterval(retryTimer);
+        return;
+      }
+      void loadLocalStatus();
+    }, 2000);
+    return () => window.clearInterval(retryTimer);
   }, [loadLocalStatus]);
 
   useEffect(() => {
