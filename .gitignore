@@ -1,0 +1,75 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# tauri
+/src-tauri/target
+
+# android gen 工程保留（含手动定制：MainActivity 分享桥 / manifest / gradle 配置），
+# 仅忽略其构建产物
+/src-tauri/gen/android/.gradle
+/src-tauri/gen/android/build
+/src-tauri/gen/android/app/build
+/src-tauri/gen/android/app/.gradle
+/src-tauri/gen/android/buildSrc/.gradle
+/src-tauri/gen/android/buildSrc/build
+/src-tauri/gen/android/local.properties
+/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar
+/src-tauri/gen/android/app/src/main/assets
+/src-tauri/gen/schemas
+
+# tool runtime state
+/.omo
+
+# static export consumed by tauri
+/dist
+
+# personal note data — never commit
+app/lib/real-feeds.json
+app/lib/real-feeds.json.bak.*
+notes.json
+
+# foreign experiment dir (created by external process 2026-08-12)
+semantic-spike/
+
+# foreign experiment dir (semantic research spike)
+semantic-spike/
+public/models/

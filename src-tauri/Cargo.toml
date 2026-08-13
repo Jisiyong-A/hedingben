@@ -1,0 +1,31 @@
+[package]
+name = "shoucang"
+version = "0.1.0"
+description = "Local desktop shell for 收藏"
+authors = ["Patrick"]
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# rustc 1.95 LLVM crashes at opt-level=3 on this crate (out of memory);
+# opt-level=2 compiles cleanly with negligible runtime difference.
+[profile.release]
+opt-level = 2
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+# Android 内嵌 sidecar（桌面端同样编译，仅 android 分支启用）
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
