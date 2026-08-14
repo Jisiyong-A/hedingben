@@ -66,16 +66,23 @@ async function getEmbedder() {
   if (!embedderPromise) {
     // eslint-disable-next-line no-console
     console.log('[semantic] loading model', MODEL_ID, 'localPath=', env.localModelPath, 'wasm=', JSON.stringify(env.backends?.onnx?.wasm?.wasmPaths ?? null));
-    // 不用 pipeline：4.2.0 在 WebView 里 pipeline 内部 tokenizer 未函数化
-    // （this.tokenizer is not a function）。改用 AutoModel + AutoTokenizer 手动
-    // 组装，tokenizer 调用兼容函数化/对象两种形态。
+    // 不用 pipeline/from_pretrained：4.2.0 的 get_tokenizer_files 依赖
+    // get_file_metadata，而对 URL 形式的 localModelPath 跳过本地探测（isURL
+    // 分支），离线时 metadata.exists=false → 文件列表空 → tokenizer 构造失败
+    // （Tokenizer must be a valid object）。手动加载 tokenizer 文件直接构造。
     embedderPromise = Promise.all([
       AutoModel.from_pretrained(MODEL_ID, { quantized: true }),
-      // 用具体 tokenizer 类（XLMRoberta）而非 AutoTokenizer：离线模式下
-      // AutoTokenizer 依赖 hub metadata 解析 tokenizer_class（被禁后 config 为 undefined）
-      XLMRobertaTokenizer.from_pretrained(MODEL_ID),
+      (async () => {
+        const base = env.localModelPath;
+        const [tokenizerJson, tokenizerConfig] = await Promise.all([
+          fetch(`${base}${MODEL_ID}/tokenizer.json`).then((r) => r.json()),
+          fetch(`${base}${MODEL_ID}/tokenizer_config.json`).then((r) => r.json()),
+        ]);
+        return new XLMRobertaTokenizer(tokenizerJson, tokenizerConfig);
+      })(),
     ]).then(
       ([model, tokenizer]) => {
+        // eslint-disable-next-line no-console
         console.log('[semantic] model+tokenizer loaded', 'tokenizerType=', typeof tokenizer);
         return { model, tokenizer };
       },
@@ -128,10 +135,12 @@ export async function embedText(text, role = 'query') {
       max_length: 512,
       return_tensor: 'pt',
     });
-    const output = await model(inputs, { pooling: 'none' });
+    // 4.2.0 AutoModel forward 返回对象 { last_hidden_state }（非 Tensor 本身）
+    const raw = await model(inputs);
+    const tensor = raw?.last_hidden_state || raw?.logits || raw;
     // eslint-disable-next-line no-console
-    console.log('[semantic] embed output dims', JSON.stringify(output.dims), 'len', output.data.length);
-    return normalizeEmbedding(output);
+    console.log('[semantic] embed output dims', JSON.stringify(tensor?.dims ?? null), 'len', tensor?.data?.length ?? 'n/a');
+    return normalizeEmbedding(tensor);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[semantic] embed FAILED:', String((err && err.message) || err).slice(0, 300));
