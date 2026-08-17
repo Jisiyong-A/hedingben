@@ -282,6 +282,25 @@ export async function deleteStoredNote(noteId: string): Promise<DeleteNoteResult
   };
 }
 
+export async function deleteLocalVideo(noteId: string): Promise<{ ok: boolean; note: Note }> {
+  const payload = await fetchLocalApi<{
+    ok?: boolean;
+    note?: RawNote;
+  }>(`/notes/${encodeURIComponent(noteId)}/video/delete`, {
+    method: 'POST',
+  });
+
+  const note = payload.note ? normalizeNote(payload.note as Partial<Note>) : undefined;
+  if (!note) {
+    throw new Error('视频已删除，但返回结果不完整');
+  }
+
+  return {
+    ok: payload.ok !== false,
+    note,
+  };
+}
+
 export function formatNumber(num: number): string {
   if (num >= 10000) return (num / 10000).toFixed(1) + 'w';
   if (num >= 1000) return (num / 1000).toFixed(1) + 'k';

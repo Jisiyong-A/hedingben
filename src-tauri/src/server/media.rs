@@ -39,6 +39,17 @@ pub fn is_allowed_remote_image_url(value: &str) -> bool {
     MEDIA_HOST_SUFFIXES.iter().any(|suffix| host.to_ascii_lowercase().ends_with(suffix))
 }
 
+pub fn is_allowed_remote_video_url(value: &str) -> bool {
+    let Ok(url) = Url::parse(value) else {
+        return false;
+    };
+    if url.scheme() != "https" {
+        return false;
+    }
+    let host = url.host_str().unwrap_or("");
+    MEDIA_HOST_SUFFIXES.iter().any(|suffix| host.to_ascii_lowercase().ends_with(suffix))
+}
+
 fn extension_from_content_type(content_type: &str) -> String {
     let normalized = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
     for (name, ext) in content_type_extensions() {
@@ -155,6 +166,9 @@ async fn download_image(
 
 async fn download_video(client: &reqwest::Client, url: &str, note_directory: &std::path::Path) -> Option<Value> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    if !is_allowed_remote_video_url(url) {
         return None;
     }
     let response = match client.get(url).send().await {
@@ -374,6 +388,14 @@ mod tests {
         assert!(!is_allowed_remote_image_url("https://example.com/a.webp"));
         assert!(!is_allowed_remote_image_url("http://sns-webpic-qc.xhscdn.com/a.webp"));
         assert!(!is_allowed_remote_image_url("not a url"));
+    }
+
+    #[test]
+    fn video_host_allowlist() {
+        assert!(is_allowed_remote_video_url("https://sns-video-v3.xhscdn.com/stream/xx.mp4"));
+        assert!(!is_allowed_remote_video_url("https://example.com/a.mp4"));
+        assert!(!is_allowed_remote_video_url("http://sns-video-v3.xhscdn.com/a.mp4"));
+        assert!(!is_allowed_remote_video_url("not a url"));
     }
 
     #[test]

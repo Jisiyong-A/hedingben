@@ -528,6 +528,22 @@ async function deleteNote(noteId) {
   };
 }
 
+async function deleteNoteVideo(noteId) {
+  const existingNotes = await readNotes();
+  const target = existingNotes.find((note) => note?.id === noteId);
+  if (!target) return null;
+
+  // Idempotent: removing a missing file with force:true succeeds.
+  await rm(path.join(mediaDirectory, noteId, 'video.mp4'), { force: true });
+
+  target.videoLocalPath = '';
+  target.videoError = '用户已删除本地视频';
+  target.mediaStatus = 'partial';
+  await writeNotes(existingNotes);
+
+  return { ok: true, noteId, note: target };
+}
+
 function queueMutation(callback) {
   const result = mutationQueue.then(callback);
   mutationQueue = result.catch(() => undefined);
@@ -540,6 +556,10 @@ function queueNoteImport(body) {
 
 function queueNoteDelete(noteId) {
   return queueMutation(() => deleteNote(noteId));
+}
+
+function queueNoteVideoDelete(noteId) {
+  return queueMutation(() => deleteNoteVideo(noteId));
 }
 
 async function sendMediaFile(request, response, pathname) {
@@ -684,6 +704,17 @@ const server = createServer(async (request, response) => {
     const deleteNoteMatch = url.pathname.match(/^\/notes\/([0-9a-f]{24})$/i);
     if (request.method === 'DELETE' && deleteNoteMatch) {
       const result = await queueNoteDelete(deleteNoteMatch[1].toLowerCase());
+      if (!result) {
+        sendJson(request, response, 404, { ok: false, error: '笔记不存在或已被删除' });
+        return;
+      }
+      sendJson(request, response, 200, result);
+      return;
+    }
+
+    const deleteNoteVideoMatch = url.pathname.match(/^\/notes\/([0-9a-f]{24})\/video\/delete$/i);
+    if (request.method === 'POST' && deleteNoteVideoMatch) {
+      const result = await queueNoteVideoDelete(deleteNoteVideoMatch[1].toLowerCase());
       if (!result) {
         sendJson(request, response, 404, { ok: false, error: '笔记不存在或已被删除' });
         return;

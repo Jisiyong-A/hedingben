@@ -1,10 +1,10 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ExternalLink, Heart, Loader2, MessageCircle, Trash2, X } from 'lucide-react';
+import { Check, ExternalLink, Heart, Loader2, MessageCircle, Trash, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Note } from '../../types/xiaohongshu';
-import { formatDate, formatNumber } from '../../lib/xhs-client';
+import { deleteLocalVideo, formatDate, formatNumber } from '../../lib/xhs-client';
 import { Badge, Button } from '../ui';
 import { NoteGallery } from './NoteGallery';
 
@@ -13,16 +13,21 @@ export function NoteDetail({
   onClose,
   onDelete,
   isDeleting,
+  onNoteUpdated,
 }: {
   note: Note;
   onClose: () => void;
   onDelete: () => void;
   isDeleting: boolean;
+  onNoteUpdated?: (note: Note) => void;
 }) {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(() => new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showOcr, setShowOcr] = useState(false);
+  const [confirmingVideoDelete, setConfirmingVideoDelete] = useState(false);
+  const [deletingVideo, setDeletingVideo] = useState(false);
+  const [videoDeleteError, setVideoDeleteError] = useState<string | null>(null);
 
   const sourceImageUrls = Array.from(new Set(
     note.imageUrls?.length ? note.imageUrls : (note.coverUrl ? [note.coverUrl] : []),
@@ -39,6 +44,28 @@ export function NoteDetail({
       next.add(imageUrl);
       return next;
     });
+  };
+
+  const openSourceUrl = () => {
+    if (note.sourceUrl) {
+      window.open(note.sourceUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleDeleteVideo = async () => {
+    if (deletingVideo) return;
+    setDeletingVideo(true);
+    setVideoDeleteError(null);
+    try {
+      const result = await deleteLocalVideo(note.id);
+      setConfirmingVideoDelete(false);
+      onNoteUpdated?.(result.note);
+    } catch (error) {
+      setVideoDeleteError(error instanceof Error && error.message ? error.message : '删除本地视频失败，请重试');
+      setConfirmingVideoDelete(false);
+    } finally {
+      setDeletingVideo(false);
+    }
   };
 
   const infoRow = (label: string, value: React.ReactNode) => (
@@ -115,19 +142,104 @@ export function NoteDetail({
               flex: 1.2,
               minWidth: 0,
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              flexDirection: 'column',
               background: '#050506',
               borderRight: 'var(--border-strong)',
             }}
           >
-            <video
-              controls
-              playsInline
-              preload="metadata"
-              src={note.videoLocalPath}
-              style={{ width: '100%', height: '100%', maxHeight: 'min(86vh, 820px)', objectFit: 'contain' }}
-            />
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <video
+                controls
+                playsInline
+                preload="metadata"
+                src={note.videoLocalPath}
+                style={{ width: '100%', height: '100%', maxHeight: 'min(86vh, 820px)', objectFit: 'contain' }}
+              />
+            </div>
+            {/* Video actions — delete local copy / open original */}
+            <div
+              style={{
+                padding: '10px 14px',
+                borderTop: 'var(--border-hairline)',
+                background: '#0A0A0C',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
+              {confirmingVideoDelete ? (
+                <>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
+                    删除后本地视频文件将移除
+                  </span>
+                  <Button variant="danger" onClick={() => void handleDeleteVideo()} disabled={deletingVideo}>
+                    {deletingVideo ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                    确认删除视频
+                  </Button>
+                  <Button onClick={() => setConfirmingVideoDelete(false)} disabled={deletingVideo}>
+                    取消
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button onClick={() => setConfirmingVideoDelete(true)} style={{ color: 'var(--text-dim)' }}>
+                    <Trash size={12} />
+                    删除本地视频
+                  </Button>
+                  <Button onClick={openSourceUrl} disabled={!note.sourceUrl} style={{ color: 'var(--text-dim)' }}>
+                    <ExternalLink size={12} />
+                    去小红书查看
+                  </Button>
+                </>
+              )}
+              {videoDeleteError && (
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--warning)' }}>
+                  {videoDeleteError}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : note.type === 'video' ? (
+          <div
+            style={{
+              flex: 1.2,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 14,
+              padding: 24,
+              background: '#050506',
+              borderRight: 'var(--border-strong)',
+            }}
+          >
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                letterSpacing: '0.14em',
+                color: 'var(--text-dim)',
+              }}
+            >
+              仅保留首图和链接
+            </span>
+            <span style={{ fontSize: 12.5, color: 'var(--text-dim)', textAlign: 'center' }}>
+              本地视频已删除，可去小红书原帖查看
+            </span>
+            <Button onClick={openSourceUrl} disabled={!note.sourceUrl}>
+              <ExternalLink size={12} />
+              去小红书查看
+            </Button>
           </div>
         ) : (
           <NoteGallery

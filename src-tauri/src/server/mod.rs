@@ -73,6 +73,7 @@ fn build_router(state: ServerState) -> Router {
         .route("/notes/import", post(handle_import))
         .route("/notes/{note_id}", delete(handle_delete))
         .route("/notes/{note_id}/ocr", post(handle_ocr_update))
+        .route("/notes/{note_id}/video/delete", post(handle_video_delete))
         .route("/media/{note_id}/{file}", get(handle_media))
         .route("/models/{*path}", get(handle_models))
         .fallback(handle_not_found)
@@ -483,6 +484,48 @@ async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<Str
         "deletedId": note_id,
         "lastImportedAt": get_last_imported_at(&rest_array),
     }))
+}
+
+/// 校验笔记 ID 格式（小红书 note id：20-26 位十六进制，调用方需先小写化）。
+fn is_valid_note_id(note_id: &str) -> bool {
+    static ID_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let id_pattern = ID_PATTERN.get_or_init(|| regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap());
+    id_pattern.is_match(note_id)
+}
+
+/// 把「用户已删除本地视频」的状态写进 note。幂等：videoLocalPath 已为空也照常返回。
+fn apply_video_delete(note: &mut Value) {
+    note["videoLocalPath"] = Value::String(String::new());
+    note["videoError"] = Value::String("用户已删除本地视频".to_string());
+    note["mediaStatus"] = Value::String("partial".to_string());
+}
+
+/// POST /notes/{id}/video/delete —— 删除本地已下载的视频文件并标记笔记状态。
+/// 幂等：文件不存在或 videoLocalPath 已为空都正常返回 ok。
+async fn handle_video_delete(State(state): State<ServerState>, Path(note_id): Path<String>) -> Response {
+    let note_id = note_id.to_ascii_lowercase();
+    if !is_valid_note_id(&note_id) {
+        return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
+    }
+
+    let mut notes = read_notes(&state).await;
+    let target = notes.iter_mut().find(|note| note["id"].as_str() == Some(note_id.as_str()));
+    let Some(target) = target else {
+        return error_json(StatusCode::NOT_FOUND, "笔记不存在或已被删除");
+    };
+
+    // 删除本地视频文件；文件不存在也视为成功（幂等）
+    let video_path = state.media_directory.join(&note_id).join("video.mp4");
+    let _ = tokio::fs::remove_file(&video_path).await;
+
+    apply_video_delete(target);
+    // 克隆更新后的笔记供响应返回（前端 deleteLocalVideo 期待 payload.note）
+    let updated_note = target.clone();
+
+    if let Err(message) = write_notes(&state, &Value::Array(notes)).await {
+        return error_json(StatusCode::INTERNAL_SERVER_ERROR, &message);
+    }
+    ok_json(json!({"ok": true, "noteId": note_id, "note": updated_note}))
 }
 
 const MEDIA_CONTENT_TYPES: [(&str, &str); 8] = [
@@ -980,5 +1023,133 @@ mod integration_tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn video_delete_roundtrip() {
+        let dir = spawn_server("video", 24323).await;
+        let client = reqwest::Client::new();
+
+        // 先导入一条（无媒体）
+        let payload = json!({
+            "note": {
+                "sourceUrl": "https://www.xiaohongshu.com/explore/abcdef0123456789abcdef",
+                "title": "视频删除测试",
+                "content": "用于视频删除端点测试的正文",
+                "imageUrls": [],
+            }
+        });
+        client
+            .post("http://127.0.0.1:24323/notes/import")
+            .json(&payload)
+            .send()
+            .await
+            .unwrap();
+
+        // 模拟真实「已下载视频」状态：造 video.mp4 文件 + 更新笔记字段
+        let media_dir = dir.join("media/abcdef0123456789abcdef");
+        std::fs::create_dir_all(&media_dir).unwrap();
+        std::fs::write(media_dir.join("video.mp4"), b"fake-video").unwrap();
+        let notes_file = dir.join("notes.json");
+        let mut stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&notes_file).unwrap()).unwrap();
+        stored[0]["videoLocalPath"] =
+            json!("http://127.0.0.1:4318/media/abcdef0123456789abcdef/video.mp4");
+        stored[0]["mediaStatus"] = json!("downloaded");
+        std::fs::write(&notes_file, serde_json::to_string(&stored).unwrap()).unwrap();
+
+        // 删除视频
+        let resp = client
+            .post("http://127.0.0.1:24323/notes/abcdef0123456789abcdef/video/delete")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value = resp.json().await.unwrap();
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["noteId"], "abcdef0123456789abcdef");
+        // 返回体含更新后的 note（前端 deleteLocalVideo 依赖 payload.note）
+        assert_eq!(body["note"]["videoLocalPath"], "");
+        assert_eq!(body["note"]["videoError"], "用户已删除本地视频");
+        assert_eq!(body["note"]["mediaStatus"], "partial");
+
+        // 本地文件已删除
+        assert!(!media_dir.join("video.mp4").exists());
+
+        // 笔记字段已更新
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(&notes_file).unwrap()).unwrap();
+        let note = &stored.as_array().unwrap()[0];
+        assert_eq!(note["videoLocalPath"], "");
+        assert_eq!(note["videoError"], "用户已删除本地视频");
+        assert_eq!(note["mediaStatus"], "partial");
+
+        // 幂等：videoLocalPath 已为空、文件已不存在，再删一次仍返回 ok
+        let resp = client
+            .post("http://127.0.0.1:24323/notes/abcdef0123456789abcdef/video/delete")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // 无效 ID → 400
+        let bad = client
+            .post("http://127.0.0.1:24323/notes/not-a-valid-id/video/delete")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+
+        // 不存在的笔记 → 404
+        let missing = client
+            .post("http://127.0.0.1:24323/notes/fedcba9876543210fedcba/video/delete")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn apply_video_delete_clears_fields_and_is_idempotent() {
+        let mut note = json!({
+            "id": "abcdef0123456789abcdef",
+            "videoLocalPath": "http://127.0.0.1:4318/media/abcdef0123456789abcdef/video.mp4",
+            "videoError": "",
+            "mediaStatus": "downloaded",
+        });
+
+        apply_video_delete(&mut note);
+        assert_eq!(note["videoLocalPath"], "");
+        assert_eq!(note["videoError"], "用户已删除本地视频");
+        assert_eq!(note["mediaStatus"], "partial");
+
+        // 幂等：再次调用不改变结果、不报错
+        apply_video_delete(&mut note);
+        assert_eq!(note["videoLocalPath"], "");
+        assert_eq!(note["mediaStatus"], "partial");
+    }
+
+    #[test]
+    fn is_valid_note_id_accepts_hex_ids_and_rejects_others() {
+        assert!(is_valid_note_id("abcdef0123456789abcdef"));
+        assert!(is_valid_note_id("0123456789abcdef01234567")); // 24 位
+        assert!(is_valid_note_id("abcdef0123456789abcde12345")); // 26 位
+
+        assert!(!is_valid_note_id("not-a-valid-id"));
+        assert!(!is_valid_note_id("abcdef0123456789abc")); // 19 位（过短）
+        assert!(!is_valid_note_id("abcdef0123456789abcdef0123456")); // 27 位（过长）
+        assert!(!is_valid_note_id("abcdef0123456789abcdeg")); // 含非十六进制字符
+        assert!(!is_valid_note_id(""));
+
+        // 大写须先小写化（handler 内已处理）
+        assert!(!is_valid_note_id("ABCDEF0123456789ABCDEF"));
+        assert!(is_valid_note_id(&"ABCDEF0123456789ABCDEF".to_ascii_lowercase()));
     }
 }

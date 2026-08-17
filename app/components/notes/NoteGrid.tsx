@@ -12,6 +12,7 @@ export function NoteGrid({
   onOpen,
   onDragStart,
   onDragEnd,
+  compact,
 }: {
   notes: Note[];
   matchSources?: Record<string, MatchSource[]>;
@@ -19,14 +20,15 @@ export function NoteGrid({
   onOpen: (note: Note) => void;
   onDragStart: (noteId: string) => void;
   onDragEnd: () => void;
+  compact?: boolean;
 }) {
   return (
     <motion.div
       layout
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(224px, 1fr))',
-        gap: 14,
+        gridTemplateColumns: compact ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fill, minmax(224px, 1fr))',
+        gap: compact ? 10 : 14,
       }}
     >
       {notes.map((note, index) => (
@@ -39,6 +41,7 @@ export function NoteGrid({
           onClick={() => onOpen(note)}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
+          compact={compact}
         />
       ))}
     </motion.div>

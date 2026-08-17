@@ -14,6 +14,7 @@ export function NoteCard({
   onClick,
   onDragStart,
   onDragEnd,
+  compact,
 }: {
   note: Note;
   index: number;
@@ -22,6 +23,7 @@ export function NoteCard({
   onClick: () => void;
   onDragStart?: (noteId: string) => void;
   onDragEnd?: () => void;
+  compact?: boolean;
 }) {
   const hasOcr = Boolean((note.ocrText || '').trim());
   const imageCount = (note.imageUrls || []).length || (note.coverUrl ? 1 : 0);
@@ -55,7 +57,7 @@ export function NoteCard({
         userSelect: 'none',
         background: 'var(--surface)',
         border: 'var(--border-hairline)',
-        borderRadius: 'var(--radius-4)',
+        borderRadius: compact ? 'var(--radius-3)' : 'var(--radius-4)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -66,7 +68,7 @@ export function NoteCard({
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--line)')}
     >
       {/* Image — geometric zone */}
-      <div style={{ position: 'relative', aspectRatio: '4 / 3', background: '#0A0A0C', overflow: 'hidden' }}>
+      <div style={{ position: 'relative', aspectRatio: compact ? '3 / 4' : '4 / 3', background: '#0A0A0C', overflow: 'hidden' }}>
         {note.coverUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
@@ -91,27 +93,38 @@ export function NoteCard({
         )}
         {/* Type / media badges */}
         <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 5 }}>
-          {note.type === 'video' && <Badge>VIDEO</Badge>}
+          {note.type === 'video' && note.videoLocalPath && <Badge>VIDEO</Badge>}
+          {note.type === 'video' && !note.videoLocalPath && <Badge>LINK-ONLY</Badge>}
           {!mediaReady && <Badge tone="signal">MEDIA?</Badge>}
         </div>
       </div>
 
       {/* Meta — geometry partition */}
-      <div style={{ padding: '10px 12px 11px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span
-            style={{
-              fontFamily: 'var(--font-dot)',
-              fontSize: 16,
-              color: 'var(--text-faint)',
-              letterSpacing: '0.04em',
-            }}
-          >
-            {String(index + 1).padStart(2, '0')} /
-          </span>
-          <Badge tone={note.category === 'inbox' ? 'signal' : 'default'}>{category}</Badge>
-          {hasOcr && <Badge tone="ok">OCR</Badge>}
-        </div>
+      <div
+        style={{
+          padding: compact ? '8px 10px 9px' : '10px 12px 11px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: compact ? 4 : 6,
+          flex: 1,
+        }}
+      >
+        {!compact && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span
+              style={{
+                fontFamily: 'var(--font-dot)',
+                fontSize: 16,
+                color: 'var(--text-faint)',
+                letterSpacing: '0.04em',
+              }}
+            >
+              {String(index + 1).padStart(2, '0')} /
+            </span>
+            <Badge tone={note.category === 'inbox' ? 'signal' : 'default'}>{category}</Badge>
+            {hasOcr && <Badge tone="ok">OCR</Badge>}
+          </div>
+        )}
 
         <p
           className="line-clamp-2"
@@ -128,7 +141,7 @@ export function NoteCard({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 8,
+            gap: compact ? 4 : 8,
             paddingTop: 2,
             borderTop: 'var(--border-hairline)',
           }}
@@ -136,7 +149,7 @@ export function NoteCard({
           <span
             style={{
               fontFamily: 'var(--font-mono)',
-              fontSize: 10,
+              fontSize: compact ? 9 : 10,
               color: 'var(--text-faint)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -145,13 +158,13 @@ export function NoteCard({
           >
             {note.author?.name || '—'}
           </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: compact ? 4 : 6, flexShrink: 0 }}>
             {hasOcr && (
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--success)' }}>
                 OCR • {imageCount} IMAGES
               </span>
             )}
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: compact ? 9 : 10, color: 'var(--text-faint)' }}>
               {formatDate(note.savedAt)}
             </span>
           </span>

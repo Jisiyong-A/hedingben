@@ -708,6 +708,7 @@ export function DeskView() {
               onOpen={setExpanded}
               onDragStart={(noteId) => setDraggedNoteId(noteId)}
               onDragEnd={handleDragEnd}
+              compact={isCompact}
             />
           )}
 
@@ -766,6 +767,10 @@ export function DeskView() {
             onClose={() => setExpanded(null)}
             onDelete={() => void handleDeleteNote(expanded)}
             isDeleting={deletingNoteId === expanded.id}
+            onNoteUpdated={(updated) => {
+              setNotes(notes.map((current) => (current.id === updated.id ? updated : current)));
+              setExpanded(updated);
+            }}
           />
         )}
       </AnimatePresence>
