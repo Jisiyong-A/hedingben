@@ -527,7 +527,7 @@ export function DeskView() {
       }}
       onDrop={handleExternalDrop}
       style={{
-        height: '100vh',
+        height: '100dvh',
         display: 'flex',
         flexDirection: 'column',
         background: 'var(--bg)',

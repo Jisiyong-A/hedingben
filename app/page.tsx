@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { DeskView } from './components/DeskView';
 import { useApp } from './lib/store';
-import { registerShareReceive } from './lib/share-receive';
+import { registerInsets, registerShareReceive } from './lib/share-receive';
 import { getNotes } from './lib/xhs-client';
 
 export default function Home() {
@@ -38,11 +38,14 @@ export default function Home() {
       () => void load(),
       (message) => dispatch({ type: 'SET_ERROR', payload: message }),
     );
+    // Android 系统栏 inset（状态栏/导航栏高度 → CSS 变量），桌面端 no-op
+    const unregisterInsets = registerInsets();
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
       unregisterShare();
+      unregisterInsets();
     };
   }, [dispatch]); // dispatch is stable, no infinite loop
 

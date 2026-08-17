@@ -7,7 +7,33 @@ declare global {
     ShoucangShareBridge?: {
       take: () => string;
     };
+    /**
+     * Kotlin 注入系统栏 inset（px，dp=CSS px）。
+     * WebView edge-to-edge 绘制时系统栏覆盖在内容上，前端必须留出
+     * 状态栏/导航栏空间，否则底部导航被手势条遮挡、顶部状态栏与 header 重叠。
+     */
+    __setInsets?: (top: number, bottom: number) => void;
   }
+}
+
+/**
+ * 注册系统栏 inset 消费者：Kotlin onWebViewCreate 后周期性注入
+ * window.__setInsets(top, bottom)，本函数把值写入 CSS 变量，
+ * 供 header / MobileNavBar / safe-area 布局消费。
+ * 桌面端无此调用，函数安全 no-op（CSS 变量回退 env(safe-area-inset-*)）。
+ */
+export function registerInsets(): () => void {
+  if (typeof window === 'undefined') return () => {};
+  if (!window.__setInsets) {
+    window.__setInsets = (top: number, bottom: number) => {
+      const root = document.documentElement;
+      if (top > 0) root.style.setProperty('--inset-top', `${top}px`);
+      if (bottom > 0) root.style.setProperty('--inset-bottom', `${bottom}px`);
+    };
+  }
+  return () => {
+    delete window.__setInsets;
+  };
 }
 
 /**

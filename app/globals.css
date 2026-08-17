@@ -5,7 +5,16 @@
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  /* 多尺寸设备适配：布局视口不得超出设备宽度（原生层 useWideViewPort=false
+     之外的双保险）。100vw 在部分 WebView 含滚动条宽度，用 100% 更稳。 */
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
 
 body {
   font-family: var(--font-sans);
@@ -14,6 +23,18 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden; /* app shell manages its own scroll regions */
+  width: 100%;
+  max-width: 100%;
+  /* 系统栏 inset 由具体组件消费（TitleBar 顶部 / MobileNavBar 底部），
+     不在 body 层加 padding —— 否则 100vh 根容器会被推下导致底部溢出 */
+}
+
+/* 容器级移动端防护：任何子元素不得撑破设备宽度 */
+#__next, .app-shell {
+  width: 100%;
+  max-width: 100%;
+  min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 /* Dot-matrix fields — reusable via .dot-field / .dot-field-fine /

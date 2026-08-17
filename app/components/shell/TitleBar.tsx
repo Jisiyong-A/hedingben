@@ -28,8 +28,10 @@ export function TitleBar({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 18,
-        padding: '12px 20px',
+        gap: compact ? 10 : 18,
+        padding: compact
+          ? `calc(10px + var(--inset-top, 0px)) 12px 10px`
+          : '12px 20px',
         background: 'rgba(0,0,0,0.88)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
@@ -79,7 +81,7 @@ export function TitleBar({
       </div>
 
       {/* Search — core control, not an icon */}
-      <div style={{ position: 'relative', flex: 1, maxWidth: 420, minWidth: 200 }}>
+      <div style={{ position: 'relative', flex: 1, maxWidth: 420, minWidth: compact ? 0 : 200 }}>
         <Search
           size={13}
           strokeWidth={1.8}

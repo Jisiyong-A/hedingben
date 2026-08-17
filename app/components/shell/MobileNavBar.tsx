@@ -66,7 +66,7 @@ export function MobileNavBar({
         bottom: 0,
         zIndex: 900,
         display: 'flex',
-        padding: '6px 12px calc(6px + env(safe-area-inset-bottom, 0px))',
+        padding: '6px 12px calc(6px + var(--inset-bottom, env(safe-area-inset-bottom, 0px)))',
         background: 'rgba(0,0,0,0.92)',
         backdropFilter: 'blur(14px)',
         WebkitBackdropFilter: 'blur(14px)',
