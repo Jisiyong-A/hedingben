@@ -764,6 +764,7 @@ export function DeskView() {
           <NoteDetail
             key={expanded.id}
             note={expanded}
+            compact={isCompact}
             onClose={() => setExpanded(null)}
             onDelete={() => void handleDeleteNote(expanded)}
             isDeleting={deletingNoteId === expanded.id}

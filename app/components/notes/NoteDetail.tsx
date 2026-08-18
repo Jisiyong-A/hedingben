@@ -14,12 +14,14 @@ export function NoteDetail({
   onDelete,
   isDeleting,
   onNoteUpdated,
+  compact = false,
 }: {
   note: Note;
   onClose: () => void;
   onDelete: () => void;
   isDeleting: boolean;
   onNoteUpdated?: (note: Note) => void;
+  compact?: boolean;
 }) {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(() => new Set());
@@ -90,9 +92,70 @@ export function NoteDetail({
       >
         {label}
       </span>
-      <span style={{ fontSize: 12.5, color: 'var(--text-dim)', minWidth: 0, wordBreak: 'break-word' }}>
+      <span style={{ fontSize: compact ? 12 : 12.5, color: 'var(--text-dim)', minWidth: 0, wordBreak: 'break-word' }}>
         {value}
       </span>
+    </div>
+  );
+
+  const topBar = (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+        padding: '14px 16px',
+        borderBottom: 'var(--border-hairline)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <Badge tone={note.category === 'inbox' ? 'signal' : 'default'}>{category}</Badge>
+        {!compact && <Badge>{formatDate(note.savedAt)}</Badge>}
+        {!compact && Boolean(ocrText) && <Badge tone="ok">OCR</Badge>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {!compact && note.sourceUrl && (
+          <a
+            href={note.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            title="打开原链接"
+            aria-label="打开原链接"
+            style={{
+              display: 'inline-flex',
+              width: 30,
+              height: 30,
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-dim)',
+              borderRadius: 'var(--radius-2)',
+              border: 'var(--border-hairline)',
+            }}
+          >
+            <ExternalLink size={13} strokeWidth={1.8} />
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭"
+          style={{
+            display: 'inline-flex',
+            width: 30,
+            height: 30,
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--text-dim)',
+            borderRadius: 'var(--radius-2)',
+            border: 'var(--border-hairline)',
+            background: 'transparent',
+            cursor: 'pointer',
+          }}
+        >
+          <X size={14} />
+        </button>
+      </div>
     </div>
   );
 
@@ -111,12 +174,12 @@ export function NoteDetail({
         inset: 0,
         zIndex: 'var(--z-overlay)',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: compact ? 'stretch' : 'center',
         justifyContent: 'center',
         background: 'rgba(0,0,0,0.86)',
         backdropFilter: 'blur(14px)',
         WebkitBackdropFilter: 'blur(14px)',
-        padding: 24,
+        padding: compact ? 0 : 24,
       }}
     >
       <motion.div
@@ -127,41 +190,73 @@ export function NoteDetail({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: '100%',
-          maxWidth: 1060,
-          height: 'min(86vh, 820px)',
+          maxWidth: compact ? '100%' : 1060,
+          height: compact ? '100dvh' : 'min(86vh, 820px)',
           background: '#0A0A0C',
-          border: 'var(--border-strong)',
-          borderRadius: 'var(--radius-6)',
-          overflow: 'hidden',
+          border: compact ? 'none' : 'var(--border-strong)',
+          borderRadius: compact ? 0 : 'var(--radius-6)',
+          overflow: compact ? 'hidden auto' : 'hidden',
           display: 'flex',
+          flexDirection: compact ? 'column' : 'row',
         }}
       >
+        {compact && (
+          <div
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 30,
+              flexShrink: 0,
+              background: 'var(--surface)',
+            }}
+          >
+            {topBar}
+          </div>
+        )}
         {note.videoLocalPath ? (
           <div
             style={{
-              flex: 1.2,
+              flex: compact ? 'none' : 1.2,
               minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
               background: '#050506',
-              borderRight: 'var(--border-strong)',
+              borderRight: compact ? 'none' : 'var(--border-strong)',
+              width: compact ? '100%' : undefined,
             }}
           >
             <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
+              style={
+                compact
+                  ? {
+                      aspectRatio: '16 / 9',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: '#050506',
+                    }
+                  : {
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }
+              }
             >
               <video
                 controls
                 playsInline
-                preload="metadata"
+                autoPlay={compact}
+                muted={compact}
+                loop={compact}
+                preload={compact ? 'auto' : 'metadata'}
                 src={note.videoLocalPath}
-                style={{ width: '100%', height: '100%', maxHeight: 'min(86vh, 820px)', objectFit: 'contain' }}
+                style={
+                  compact
+                    ? { width: '100%', height: '100%', objectFit: 'contain', display: 'block' }
+                    : { width: '100%', height: '100%', maxHeight: 'min(86vh, 820px)', objectFit: 'contain' }
+                }
               />
             </div>
             {/* Video actions — delete local copy / open original */}
@@ -211,7 +306,7 @@ export function NoteDetail({
         ) : note.type === 'video' ? (
           <div
             style={{
-              flex: 1.2,
+              flex: compact ? 'none' : 1.2,
               minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
@@ -220,7 +315,8 @@ export function NoteDetail({
               gap: 14,
               padding: 24,
               background: '#050506',
-              borderRight: 'var(--border-strong)',
+              borderRight: compact ? 'none' : 'var(--border-strong)',
+              width: compact ? '100%' : undefined,
             }}
           >
             <span
@@ -247,85 +343,29 @@ export function NoteDetail({
             activeImageIndex={activeImageIndex}
             onSelect={setActiveImageIndex}
             onImageFailed={markImageFailed}
+            compact={compact}
           />
         )}
 
         {/* NOTE DATA — right geometric block */}
         <div
           style={{
-            flex: 1,
+            flex: compact ? 'none' : 1,
             minWidth: 0,
             display: 'flex',
             flexDirection: 'column',
             background: 'var(--surface)',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-              padding: '14px 16px',
-              borderBottom: 'var(--border-hairline)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <Badge tone={note.category === 'inbox' ? 'signal' : 'default'}>{category}</Badge>
-              <Badge>{formatDate(note.savedAt)}</Badge>
-              {Boolean(ocrText) && <Badge tone="ok">OCR</Badge>}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {note.sourceUrl && (
-                <a
-                  href={note.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="打开原链接"
-                  aria-label="打开原链接"
-                  style={{
-                    display: 'inline-flex',
-                    width: 30,
-                    height: 30,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--text-dim)',
-                    borderRadius: 'var(--radius-2)',
-                    border: 'var(--border-hairline)',
-                  }}
-                >
-                  <ExternalLink size={13} strokeWidth={1.8} />
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="关闭"
-                style={{
-                  display: 'inline-flex',
-                  width: 30,
-                  height: 30,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-dim)',
-                  borderRadius: 'var(--radius-2)',
-                  border: 'var(--border-hairline)',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
+          {!compact && topBar}
 
-          <div style={{ padding: '14px 18px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          <div style={{ padding: '14px 18px', overflowY: compact ? 'visible' : 'auto', flex: compact ? 'none' : 1, minHeight: 0 }}>
             <h2
               style={{
                 margin: 0,
-                fontSize: 17,
+                fontSize: compact ? 16 : 17,
                 fontWeight: 600,
-                lineHeight: 1.45,
+                lineHeight: compact ? 1.5 : 1.45,
                 color: 'var(--text)',
               }}
             >
@@ -341,7 +381,7 @@ export function NoteDetail({
                 paddingBottom: 4,
                 color: 'var(--text-dim)',
                 fontFamily: 'var(--font-mono)',
-                fontSize: 11,
+                fontSize: compact ? 10.5 : 11,
               }}
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -363,8 +403,8 @@ export function NoteDetail({
               <div
                 style={{
                   marginTop: 14,
-                  fontSize: 13.5,
-                  lineHeight: 1.85,
+                  fontSize: compact ? 13 : 13.5,
+                  lineHeight: compact ? 1.7 : 1.85,
                   color: 'var(--text-dim)',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
@@ -373,7 +413,7 @@ export function NoteDetail({
                 {rawContent}
               </div>
             ) : (
-              <div style={{ marginTop: 16, color: 'var(--text-faint)', fontSize: 12.5 }}>
+              <div style={{ marginTop: 16, color: 'var(--text-faint)', fontSize: compact ? 12 : 12.5 }}>
                 这篇笔记没有可显示的正文。
               </div>
             )}
@@ -399,8 +439,8 @@ export function NoteDetail({
                           borderRadius: 'var(--radius-3)',
                           background: '#0D0D0F',
                           border: 'var(--border-hairline)',
-                          fontSize: 12.5,
-                          lineHeight: 1.8,
+                          fontSize: compact ? 12 : 12.5,
+                          lineHeight: compact ? 1.65 : 1.8,
                           color: 'var(--text-dim)',
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-word',
