@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ExternalLink, Heart, Loader2, MessageCircle, Trash, Trash2, X } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Note } from '../../types/xiaohongshu';
 import { deleteLocalVideo, formatDate, formatNumber } from '../../lib/xhs-client';
 import { Badge, Button } from '../ui';
@@ -69,6 +69,33 @@ export function NoteDetail({
       setDeletingVideo(false);
     }
   };
+
+  // Android 返回键 / 浏览器后退：注册 history 记录，返回时关闭浮层而不是退出 app。
+  // 模态浮层无独立路由，必须压入一条 history 状态，popstate 触发时回调 onClose。
+  useEffect(() => {
+    // 压入一条历史记录，使 Android 返回键有可回退的层级
+    window.history.pushState({ noteDetail: note.id }, '');
+    const handlePopState = () => {
+      onClose();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('keydown', handleKeyDown);
+      // 若还有我们压入的记录则回退，避免历史堆积
+      if (window.history.state && window.history.state.noteDetail === note.id) {
+        window.history.back();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id]);
 
   const infoRow = (label: string, value: React.ReactNode) => (
     <div
