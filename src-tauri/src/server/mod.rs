@@ -2,6 +2,7 @@
 //! 保持 HTTP 契约与桌面版完全一致（端口 4318、路由、响应结构、错误文案），
 //! 前端 app/lib/xhs-client.ts 零改动复用。
 
+mod bilibili_resolver;
 mod category;
 mod media;
 mod note_import;
@@ -368,11 +369,11 @@ async fn run_import(state: &ServerState, body: Value) -> Result<Value, String> {
             let dragged = note_import::parse_dragged_note_input(&input)?;
             match dragged {
                 Some(payload) => note_import::normalize_imported_note(&payload)?,
-                None => resolve_via_input(&input).await?,
+                None => resolve_via_input(&input, &state.data_directory).await?,
             }
         }
     } else {
-        resolve_via_input(&input).await?
+        resolve_via_input(&input, &state.data_directory).await?
     };
 
     let localized = media::localize_note_media(&normalized, &state.media_directory, &state.public_base_url).await;
@@ -394,11 +395,17 @@ async fn run_import(state: &ServerState, body: Value) -> Result<Value, String> {
 }
 
 /// 输入兜底链路：拖拽卡片 payload → 共享文本 → URL 匿名解析
-async fn resolve_via_input(input: &str) -> Result<Value, String> {
+async fn resolve_via_input(input: &str, data_directory: &FsPath) -> Result<Value, String> {
     if let Some(card) = note_import::parse_dragged_card_input(input)? {
         let source_url = card["sourceUrl"].as_str().unwrap_or("").to_string();
         let expected_id = card["id"].as_str().unwrap_or("").to_string();
-        let resolved = resolver::resolve_anonymous_note(&source_url, Some(&expected_id)).await?;
+        let resolved = if is_bilibili_source_url(&source_url) {
+            let fetcher = bilibili_resolver::reqwest_fetcher()?;
+            bilibili_resolver::resolve_bilibili_note(&source_url, &fetcher, Some(data_directory), None)
+                .await?
+        } else {
+            resolver::resolve_anonymous_note(&source_url, Some(&expected_id)).await?
+        };
         let title = card["title"].as_str().unwrap_or("").to_string();
         let mut normalized = note_import::normalize_imported_note(&resolved)?;
         if normalized["title"].as_str().unwrap_or("").is_empty() && !title.is_empty() {
@@ -407,17 +414,45 @@ async fn resolve_via_input(input: &str) -> Result<Value, String> {
         return Ok(normalized);
     }
 
-    match note_import::note_from_shared_text(input) {
-        Ok(note) => Ok(note),
-        Err(shared_err) => {
-            // 共享文本不可用时，尝试纯 URL 匿名解析
-            let source_url = note_import::extract_shared_note_url(input)?;
-            let note_id = note_import::extract_note_id_from_url(&source_url);
-            let resolved = resolver::resolve_anonymous_note(&source_url, note_id.as_deref()).await?;
-            let _ = shared_err;
-            note_import::normalize_imported_note(&resolved)
+    // 分享文本（可能含短链）：优先 URL 匿名解析拿完整内容
+    // （resolver 内部负责展开短链并提取 note id），
+    // 解析失败（风控/网络）再回退共享文本（至少保留标题与链接）。
+    match note_import::extract_shared_note_url(input) {
+        Ok(source_url) => {
+            let resolved = if is_bilibili_source_url(&source_url) {
+                let fetcher = bilibili_resolver::reqwest_fetcher()?;
+                bilibili_resolver::resolve_bilibili_note(
+                    &source_url,
+                    &fetcher,
+                    Some(data_directory),
+                    Some(input),
+                )
+                .await
+            } else {
+                resolver::resolve_anonymous_note(&source_url, None).await
+            };
+            match resolved {
+                Ok(resolved) => note_import::normalize_imported_note(&resolved),
+                Err(resolve_err) => match note_import::note_from_shared_text(input) {
+                    Ok(note) => Ok(note),
+                    Err(_) => Err(resolve_err),
+                },
+            }
         }
+        Err(url_err) => match note_import::note_from_shared_text(input) {
+            Ok(note) => Ok(note),
+            Err(_) => Err(url_err),
+        },
     }
+}
+
+fn is_bilibili_source_url(source_url: &str) -> bool {
+    url::Url::parse(source_url)
+        .map(|u| {
+            let host = u.host_str().unwrap_or("").to_ascii_lowercase();
+            host == "b23.tv" || host.ends_with("bilibili.com")
+        })
+        .unwrap_or(false)
 }
 
 /// POST /notes/{id}/ocr —— Android 端 ML Kit OCR 结果回写（Kotlin bridge → 前端编排）。
