@@ -23,6 +23,13 @@
 
 扩展没有 `tabs` 或 `cookies` 权限，不能后台打开登录页面或读取账号凭证。匿名解析器显式使用 `credentials: omit`，失败时不会回退到登录浏览器。这条链路只处理用户拖入的单条笔记，不访问收藏夹。
 
+### B 站解析器边界例外
+
+小红书解析器全程自报 UA（`ShouCangFavorites/0.1`），不伪装。B 站解析器有两处不同（透明披露）：
+
+- **UA 伪装**：B 站拒绝非浏览器 UA 请求，解析器使用 Chrome 151 UA（仅限 B 站，小红书保持自报）。代码：`scripts/lib/bilibili-resolver.mjs:5` / `src-tauri/src/server/bilibili_resolver.rs:4`
+- **buvid3 匿名指纹**：B 站 opus 图文接口（`/x/polymer/web-dynamic/v1/opus/detail`）硬性要求 `buvid3` Cookie，否则返回 412。指纹格式为 `uuid{hex16}infoc`，每安装生成一次并持久化复用，不携带登录态或账号信息。代码：`scripts/lib/bilibili-resolver.mjs:49-78` / `src-tauri/src/server/bilibili_resolver.rs:96-145`
+
 ## 主要文件
 
 - `app/components/DeskView.tsx`：首页、卡片分组、整页拖入反馈
@@ -40,7 +47,7 @@
 npm test
 npm run lint
 npm run build
-cargo test        # 在 src-tauri/ 下：Rust sidecar 移植 + HTTP 契约测试（32 个）
+cargo test        # 在 src-tauri/ 下：Rust sidecar 移植 + HTTP 契约测试（57 个）
 ```
 
 ## Android 移植（2026-08-13，模拟器验证通过）
