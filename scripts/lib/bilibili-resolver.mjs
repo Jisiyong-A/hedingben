@@ -233,11 +233,12 @@ async function resolveVideo(bvid, aid, sourceUrl, fetchImpl) {
     tags = [];
   }
 
-  // 可选 DASH 元数据：只落清晰度/时长，明确不提取 dash 内的签名 URL。
+  // DASH 链路：提取可直接下载的 mp4/m4s baseUrl，供 downloadVideo 本地落盘与详情页本地播放
   let dashMeta = {};
+  let playableVideoUrl = '';
   try {
     const playPayload = await fetchBiliJson(
-      `${API_BASE}/x/player/playurl?bvid=${encodeURIComponent(resolvedBvid)}&cid=${cid}&fnval=16`,
+      `${API_BASE}/x/player/playurl?bvid=${encodeURIComponent(resolvedBvid)}&cid=${cid}&fnval=16&fnver=0&fourk=0`,
       fetchImpl,
     );
     const playData = assertBiliCode(playPayload);
@@ -245,8 +246,18 @@ async function resolveVideo(bvid, aid, sourceUrl, fetchImpl) {
       quality: typeof playData?.quality === 'number' ? playData.quality : undefined,
       duration: typeof playData?.duration === 'number' ? playData.duration : undefined,
     };
+    const pickVideoBaseUrl = (payload) => {
+      const durl = Array.isArray(payload?.durl) ? payload.durl : null;
+      if (durl && durl[0]?.url) return String(durl[0].url);
+      const dashVideo = payload?.dash?.video;
+      if (Array.isArray(dashVideo) && dashVideo[0]?.baseUrl) return String(dashVideo[0].baseUrl);
+      if (Array.isArray(dashVideo) && dashVideo[0]?.base_url) return String(dashVideo[0].base_url);
+      return '';
+    };
+    playableVideoUrl = pickVideoBaseUrl(playData);
   } catch {
     dashMeta = {};
+    playableVideoUrl = '';
   }
 
   const pic = cleanString(data?.pic).replace(/^http:/i, 'https:');
@@ -258,7 +269,7 @@ async function resolveVideo(bvid, aid, sourceUrl, fetchImpl) {
     content: cleanString(data?.desc),
     imageUrls: pic ? [pic] : [],
     coverUrl: pic,
-    videoUrl: '',
+    videoUrl: playableVideoUrl,
     author: {
       name: cleanString(data?.owner?.name) || '未知作者',
       avatar: face,

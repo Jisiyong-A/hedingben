@@ -8,6 +8,15 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
 const MEDIA_HOST_SUFFIXES = ['.xhscdn.com', '.xhsimg.com', '.hdslb.com', '.bilibili.com'];
+const VIDEO_HOST_SUFFIXES = [
+  '.hdslb.com',
+  '.bilibili.com',
+  '.bilivideo.com',
+  '.akamaized.net',
+  '.acgvideo.com',
+  '.upos-hz-mirrorakam.akamaized.net',
+  '.upos-sz-mirrorcosov.bilivideo.com',
+];
 const CONTENT_TYPE_EXTENSIONS = new Map([
   ['image/avif', '.avif'],
   ['image/gif', '.gif'],
@@ -81,10 +90,23 @@ async function downloadImage(url, noteDirectory, index, fetchImpl, source) {
 const MAX_VIDEO_BYTES = 300 * 1024 * 1024; // 300MB cap for a single video
 const VIDEO_TIMEOUT_MS = 10 * 60 * 1000;
 
+function isAllowedRemoteVideoUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    return VIDEO_HOST_SUFFIXES.some((suffix) => parsed.hostname.endsWith(suffix))
+      || MEDIA_HOST_SUFFIXES.some((suffix) => parsed.hostname.endsWith(suffix));
+  } catch { return false; }
+}
+
 /** Stream a remote video to <noteDir>/video.mp4. Best-effort: failures
  *  never block the import — the note stays saved with images only. */
 async function downloadVideo(url, noteDirectory, fetchImpl, source) {
   if (!/^https?:\/\//.test(url || '')) return null;
+  if (source === 'bilibili' && !isAllowedRemoteVideoUrl(url)) {
+    // B站 DASH 链路产生的可播放 mp4/m4s 必须在白名单内，拒绝未知域
+    return null;
+  }
   const referer = REFERER_BY_SOURCE[source] || REFERER_BY_SOURCE.xhs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), VIDEO_TIMEOUT_MS);

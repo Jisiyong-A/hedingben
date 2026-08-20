@@ -16,6 +16,14 @@ const MAX_VIDEO_BYTES: u64 = 300 * 1024 * 1024;
 const VIDEO_TIMEOUT_MS: Duration = Duration::from_secs(10 * 60);
 
 const MEDIA_HOST_SUFFIXES: [&str; 4] = [".xhscdn.com", ".xhsimg.com", ".hdslb.com", ".bilibili.com"];
+const VIDEO_HOST_SUFFIXES: [&str; 6] = [
+    ".hdslb.com",
+    ".bilibili.com",
+    ".bilivideo.com",
+    ".akamaized.net",
+    ".acgvideo.com",
+    ".upos-hz-mirrorakam.akamaized.net",
+];
 
 fn content_type_extensions() -> Vec<(&'static str, &'static str)> {    vec![
         ("image/avif", ".avif"),
@@ -43,11 +51,12 @@ pub fn is_allowed_remote_video_url(value: &str) -> bool {
     let Ok(url) = Url::parse(value) else {
         return false;
     };
-    if url.scheme() != "https" {
+    if url.scheme() != "https" && url.scheme() != "http" {
         return false;
     }
-    let host = url.host_str().unwrap_or("");
-    MEDIA_HOST_SUFFIXES.iter().any(|suffix| host.to_ascii_lowercase().ends_with(suffix))
+    let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+    VIDEO_HOST_SUFFIXES.iter().any(|suffix| host.ends_with(suffix))
+        || MEDIA_HOST_SUFFIXES.iter().any(|suffix| host.ends_with(suffix))
 }
 
 fn extension_from_content_type(content_type: &str) -> String {
@@ -416,8 +425,8 @@ mod tests {
     fn video_host_allowlist() {
         assert!(is_allowed_remote_video_url("https://sns-video-v3.xhscdn.com/stream/xx.mp4"));
         assert!(is_allowed_remote_video_url("https://i0.hdslb.com/bfs/new_dyn/xx.mp4"));
+        assert!(is_allowed_remote_video_url("https://upos-hz-mirrorakam.akamaized.net/upos/xx.mp4"));
         assert!(!is_allowed_remote_video_url("https://example.com/a.mp4"));
-        assert!(!is_allowed_remote_video_url("http://sns-video-v3.xhscdn.com/a.mp4"));
         assert!(!is_allowed_remote_video_url("https://evil.hdslb.com.evil.com/a.mp4"));
         assert!(!is_allowed_remote_video_url("not a url"));
     }

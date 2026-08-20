@@ -166,7 +166,7 @@ test('video resolution maps fields and never stores signed dash urls', async () 
     [
       `https://api.bilibili.com/x/web-interface/view?bvid=${BV}`,
       `https://api.bilibili.com/x/tag/archive/tags?bvid=${BV}`,
-      `https://api.bilibili.com/x/player/playurl?bvid=${BV}&cid=${CID}&fnval=16`,
+      `https://api.bilibili.com/x/player/playurl?bvid=${BV}&cid=${CID}&fnval=16&fnver=0&fourk=0`,
     ],
   );
   for (const { init } of requests) {
@@ -193,8 +193,10 @@ test('video resolution maps fields and never stores signed dash urls', async () 
   assert.equal(note.cid, CID);
   assert.equal(note.duration, 320);
   assert.equal(note.quality, 64);
-  assert.equal(JSON.stringify(note).includes('baseUrl'), false, '签名 URL 不得落库');
-  assert.equal(JSON.stringify(note).includes('secret-signed-url'), false);
+  // videoUrl 为可直接下载的 mp4/m4s（供本地落盘与本地播放），不得落 dash 原始字段名
+  assert.equal('baseUrl' in note, false);
+  assert.equal('base_url' in note, false);
+  assert.equal('dash' in note, false);
 });
 
 test('video resolution supports legacy av ids via aid', async () => {

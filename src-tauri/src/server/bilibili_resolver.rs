@@ -438,13 +438,20 @@ async fn resolve_video<F: BiliFetcher + ?Sized>(
         }
     }
 
-    // 可选 DASH 元数据：只落清晰度/时长，明确不提取 dash 内的签名 URL。
+    // DASH 链路：提取可直接下载的 mp4/m4s baseUrl，供 downloadVideo 本地落盘
     let mut dash_quality: Option<i64> = None;
     let mut dash_duration: Option<i64> = None;
+    let mut playable_video_url = String::new();
     if let Ok(play_payload) = fetch_bili_json(
         &api_url(
             "/x/player/playurl",
-            &[("bvid", &resolved_bvid), ("cid", &cid.to_string()), ("fnval", "16")],
+            &[
+                ("bvid", &resolved_bvid),
+                ("cid", &cid.to_string()),
+                ("fnval", "16"),
+                ("fnver", "0"),
+                ("fourk", "0"),
+            ],
         ),
         fetcher,
         Vec::new(),
@@ -454,6 +461,27 @@ async fn resolve_video<F: BiliFetcher + ?Sized>(
         if let Ok(play_data) = assert_bili_code(&play_payload) {
             dash_quality = play_data["quality"].as_i64();
             dash_duration = play_data["duration"].as_i64();
+            let pick_video_base_url = |payload: &Value| -> String {
+                if let Some(durl) = payload.get("durl").and_then(|v| v.as_array()) {
+                    if let Some(url) = durl.first().and_then(|v| v.get("url")).and_then(|v| v.as_str()) {
+                        return url.to_string();
+                    }
+                }
+                if let Some(video) = payload
+                    .get("dash")
+                    .and_then(|v| v.get("video"))
+                    .and_then(|v| v.as_array())
+                {
+                    if let Some(url) = video.first().and_then(|v| v.get("baseUrl")).and_then(|v| v.as_str()) {
+                        return url.to_string();
+                    }
+                    if let Some(url) = video.first().and_then(|v| v.get("base_url")).and_then(|v| v.as_str()) {
+                        return url.to_string();
+                    }
+                }
+                String::new()
+            };
+            playable_video_url = pick_video_base_url(&play_data);
         }
     }
 
@@ -481,7 +509,7 @@ async fn resolve_video<F: BiliFetcher + ?Sized>(
         "content": clean_string(&data["desc"]),
         "imageUrls": image_urls,
         "coverUrl": pic,
-        "videoUrl": "",
+        "videoUrl": playable_video_url,
         "author": {
             "name": if author_name.is_empty() { "未知作者" } else { &author_name },
             "avatar": face,
@@ -946,18 +974,17 @@ mod tests {
         assert_eq!(note["content"], "视频描述");
         assert_eq!(note["duration"], 120);
         assert_eq!(note["quality"], 64);
-        assert_eq!(note["videoUrl"], "");
+        assert_eq!(note["videoUrl"], "https://upos-hz-mirrorakam.akamaized.net/sign.mp4?token=abc");
         assert_eq!(note["author"]["name"], "作者甲");
         assert_eq!(note["author"]["userId"], "10001");
         assert!(note["coverUrl"].as_str().unwrap().starts_with("https://"));
         assert_eq!(note["tags"].as_array().unwrap().len(), 2);
         assert_eq!(note["tags"][0], "标签一");
 
-        // 只落 DASH 元数据：不包含签名 URL
+        // 仅允许落单条可播放 videoUrl，不得落 dash 原始字段
         let serialized = note.to_string();
-        assert!(!serialized.contains("baseUrl"), "signed url leaked: {serialized}");
-        assert!(!serialized.contains("upos-hz-mirrorakam"), "signed url leaked: {serialized}");
-        assert!(!serialized.contains("token="), "signed url leaked: {serialized}");
+        assert!(!serialized.contains("dash"), "dash leaked: {serialized}");
+        assert!(!serialized.contains("baseUrl"), "baseUrl leaked: {serialized}");
     }
 
     #[tokio::test]
