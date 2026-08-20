@@ -7,7 +7,7 @@ import { runOcr, getOcrEngineInfo } from '../ocr/index.mjs';
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
-const MEDIA_HOST_SUFFIXES = ['.xhscdn.com', '.xhsimg.com'];
+const MEDIA_HOST_SUFFIXES = ['.xhscdn.com', '.xhsimg.com', '.hdslb.com', '.bilibili.com'];
 const CONTENT_TYPE_EXTENSIONS = new Map([
   ['image/avif', '.avif'],
   ['image/gif', '.gif'],
@@ -32,16 +32,22 @@ function extensionFromContentType(contentType) {
   return CONTENT_TYPE_EXTENSIONS.get(normalized) || '';
 }
 
-async function fetchImageResponse(url, fetchImpl, redirectCount = 0) {
-  if (!isAllowedRemoteImageUrl(url)) throw new Error('图片地址不属于受支持的小红书图床');
+const REFERER_BY_SOURCE = {
+  bilibili: 'https://www.bilibili.com/',
+  xhs: 'https://www.xiaohongshu.com/',
+};
 
+async function fetchImageResponse(url, fetchImpl, source = 'xhs', redirectCount = 0) {
+  if (!isAllowedRemoteImageUrl(url)) throw new Error('图片地址不属于受支持的图床');
+
+  const referer = REFERER_BY_SOURCE[source] || REFERER_BY_SOURCE.xhs;
   const response = await fetchImpl(url, {
     redirect: 'manual',
     credentials: 'omit',
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-      Referer: 'https://www.xiaohongshu.com/',
+      Referer: referer,
       'User-Agent': 'ShouCangFavorites/0.1 local-media-import',
     },
   });
@@ -50,14 +56,14 @@ async function fetchImageResponse(url, fetchImpl, redirectCount = 0) {
     if (redirectCount >= MAX_REDIRECTS) throw new Error('图片重定向次数过多');
     const location = response.headers.get('location');
     if (!location) throw new Error('图片重定向缺少目标地址');
-    return fetchImageResponse(new URL(location, url).toString(), fetchImpl, redirectCount + 1);
+    return fetchImageResponse(new URL(location, url).toString(), fetchImpl, source, redirectCount + 1);
   }
   if (!response.ok) throw new Error(`图片下载失败：${response.status}`);
   return response;
 }
 
-async function downloadImage(url, noteDirectory, index, fetchImpl) {
-  const response = await fetchImageResponse(url, fetchImpl);
+async function downloadImage(url, noteDirectory, index, fetchImpl, source) {
+  const response = await fetchImageResponse(url, fetchImpl, source);
   const extension = extensionFromContentType(response.headers.get('content-type'));
   if (!extension) throw new Error('远程内容不是可识别的图片');
 
@@ -77,8 +83,9 @@ const VIDEO_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Stream a remote video to <noteDir>/video.mp4. Best-effort: failures
  *  never block the import — the note stays saved with images only. */
-async function downloadVideo(url, noteDirectory, fetchImpl) {
+async function downloadVideo(url, noteDirectory, fetchImpl, source) {
   if (!/^https?:\/\//.test(url || '')) return null;
+  const referer = REFERER_BY_SOURCE[source] || REFERER_BY_SOURCE.xhs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), VIDEO_TIMEOUT_MS);
   try {
@@ -87,7 +94,7 @@ async function downloadVideo(url, noteDirectory, fetchImpl) {
       redirect: 'follow',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
-        Referer: 'https://www.xiaohongshu.com/',
+        Referer: referer,
       },
     });
     if (!response.ok || !response.body) return null;
@@ -164,10 +171,11 @@ export async function localizeNoteMedia(note, options) {
       mediaStatus: 'none',
     };
   }
+  const source = note.source === 'bilibili' ? 'bilibili' : 'xhs';
   const downloads = await mapWithConcurrency(
     sourceUrls,
     options.downloadConcurrency || 2,
-    (url, index) => downloadImage(url, noteDirectory, index, options.fetchImpl || fetch),
+    (url, index) => downloadImage(url, noteDirectory, index, options.fetchImpl || fetch, source),
   );
   const successful = downloads.filter((item) => item?.filePath);
 
@@ -207,7 +215,7 @@ export async function localizeNoteMedia(note, options) {
   let videoLocalPath = '';
   let videoError = '';
   if (note.videoUrl) {
-    const videoResult = await downloadVideo(note.videoUrl, noteDirectory, options.fetchImpl);
+    const videoResult = await downloadVideo(note.videoUrl, noteDirectory, options.fetchImpl, source);
     if (videoResult?.filePath) {
       videoLocalPath = `${options.publicBaseUrl}/media/${note.id}/video.mp4`;
     } else {

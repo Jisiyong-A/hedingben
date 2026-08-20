@@ -15,7 +15,7 @@ const REQUEST_TIMEOUT_MS: u64 = 20_000;
 const MAX_VIDEO_BYTES: u64 = 300 * 1024 * 1024;
 const VIDEO_TIMEOUT_MS: Duration = Duration::from_secs(10 * 60);
 
-const MEDIA_HOST_SUFFIXES: [&str; 2] = [".xhscdn.com", ".xhsimg.com"];
+const MEDIA_HOST_SUFFIXES: [&str; 4] = [".xhscdn.com", ".xhsimg.com", ".hdslb.com", ".bilibili.com"];
 
 fn content_type_extensions() -> Vec<(&'static str, &'static str)> {    vec![
         ("image/avif", ".avif"),
@@ -60,13 +60,24 @@ fn extension_from_content_type(content_type: &str) -> String {
     String::new()
 }
 
-fn image_client() -> Result<reqwest::Client, String> {
+fn referer_for_source(source: &str) -> &'static str {
+    match source {
+        "bilibili" => "https://www.bilibili.com/",
+        _ => "https://www.xiaohongshu.com/",
+    }
+}
+
+fn image_client(source: &str) -> Result<reqwest::Client, String> {
     let mut headers = HeaderMap::new();
     headers.insert(
         ACCEPT,
         HeaderValue::from_static("image/avif,image/webp,image/apng,image/*,*/*;q=0.8"),
     );
-    headers.insert(REFERER, HeaderValue::from_static("https://www.xiaohongshu.com/"));
+    headers.insert(
+        REFERER,
+        HeaderValue::from_str(referer_for_source(source))
+            .map_err(|err| format!("Referer header 构造失败：{err}"))?,
+    );
     headers.insert(USER_AGENT, HeaderValue::from_static("ShouCangFavorites/0.1 local-media-import"));
     reqwest::Client::builder()
         .default_headers(headers)
@@ -84,7 +95,7 @@ async fn fetch_image_response(
 
     for redirect_count in 0..=MAX_REDIRECTS {
         if !is_allowed_remote_image_url(&current_url) {
-            return Err("图片地址不属于受支持的小红书图床".to_string());
+            return Err("图片地址不属于受支持的图床".to_string());
         }
 
         let response = client
@@ -291,7 +302,8 @@ pub async fn localize_note_media(
         return result;
     }
 
-    let client = match image_client() {
+    let source = note["source"].as_str().unwrap_or("xhs");
+    let client = match image_client(source) {
         Ok(client) => client,
         Err(err) => {
             let mut result = note.clone();
@@ -333,6 +345,13 @@ pub async fn localize_note_media(
         match reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(5))
             .timeout(VIDEO_TIMEOUT_MS)
+            .default_headers({
+                let mut h = HeaderMap::new();
+                if let Ok(val) = HeaderValue::from_str(referer_for_source(source)) {
+                    h.insert(REFERER, val);
+                }
+                h
+            })
             .build()
         {
             Ok(video_client) => {
@@ -385,17 +404,29 @@ mod tests {
         assert!(is_allowed_remote_image_url("https://sns-webpic-qc.xhscdn.com/a.webp"));
         assert!(is_allowed_remote_image_url("https://sns-img-hw.xhscdn.com/b.png"));
         assert!(is_allowed_remote_image_url("https://sns-avatar.qx.xhsimg.com/c.jpg"));
+        assert!(is_allowed_remote_image_url("https://i0.hdslb.com/bfs/new_dyn/abc.webp"));
         assert!(!is_allowed_remote_image_url("https://example.com/a.webp"));
         assert!(!is_allowed_remote_image_url("http://sns-webpic-qc.xhscdn.com/a.webp"));
+        assert!(!is_allowed_remote_image_url("https://evil.hdslb.com.evil.com/a.webp"));
+        assert!(!is_allowed_remote_image_url("https://bilivideo.com/a.webp"));
         assert!(!is_allowed_remote_image_url("not a url"));
     }
 
     #[test]
     fn video_host_allowlist() {
         assert!(is_allowed_remote_video_url("https://sns-video-v3.xhscdn.com/stream/xx.mp4"));
+        assert!(is_allowed_remote_video_url("https://i0.hdslb.com/bfs/new_dyn/xx.mp4"));
         assert!(!is_allowed_remote_video_url("https://example.com/a.mp4"));
         assert!(!is_allowed_remote_video_url("http://sns-video-v3.xhscdn.com/a.mp4"));
+        assert!(!is_allowed_remote_video_url("https://evil.hdslb.com.evil.com/a.mp4"));
         assert!(!is_allowed_remote_video_url("not a url"));
+    }
+
+    #[test]
+    fn referer_by_source() {
+        assert_eq!(referer_for_source("bilibili"), "https://www.bilibili.com/");
+        assert_eq!(referer_for_source("xhs"), "https://www.xiaohongshu.com/");
+        assert_eq!(referer_for_source("unknown"), "https://www.xiaohongshu.com/");
     }
 
     #[test]
