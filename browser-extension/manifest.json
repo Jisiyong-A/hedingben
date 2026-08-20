@@ -13,7 +13,9 @@
     {
       "matches": [
         "https://www.xiaohongshu.com/*",
-        "https://m.xiaohongshu.com/*"
+        "https://m.xiaohongshu.com/*",
+        "https://www.bilibili.com/*",
+        "https://m.bilibili.com/*"
       ],
       "js": ["page-data.js"],
       "run_at": "document_idle",
@@ -22,7 +24,9 @@
     {
       "matches": [
         "https://www.xiaohongshu.com/*",
-        "https://m.xiaohongshu.com/*"
+        "https://m.xiaohongshu.com/*",
+        "https://www.bilibili.com/*",
+        "https://m.bilibili.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

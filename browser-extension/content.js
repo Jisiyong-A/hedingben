@@ -8,21 +8,43 @@ let requestedNoteId = '';
 
 function getNoteId() {
   // XHS note IDs are typically 22-26 hex chars (varies by generation)
-  return location.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{20,26})(?:\/|$)/i)?.[1] || '';
+  const xhs = location.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{20,26})(?:\/|$)/i)?.[1];
+  if (xhs) return xhs;
+  // Bilibili video BV id (10 alphanumeric chars, case-sensitive)
+  const bv = location.pathname.match(/^\/video\/(BV[a-zA-Z0-9]{10})(?:\/|$)/)?.[1];
+  if (bv) return bv;
+  // Bilibili legacy av id
+  const av = location.pathname.match(/^\/video\/(av\d+)(?:\/|$)/i)?.[1];
+  if (av) return av;
+  // Bilibili opus (article) id
+  const opus = location.pathname.match(/^\/opus\/(\d+)(?:\/|$)/)?.[1];
+  if (opus) return opus;
+  return '';
 }
 
 function noteCardFromDragTarget(target) {
   if (!(target instanceof Element) || target.closest(`#${BUTTON_ID}`)) return null;
-  const link = target.closest('a[href*="/explore/"], a[href*="/search_result/"], a[href*="/discovery/item/"]');
+  const link = target.closest(
+    'a[href*="/explore/"], a[href*="/search_result/"], a[href*="/discovery/item/"], a[href*="/video/"]',
+  );
   if (!link) return null;
 
   try {
     const sourceUrl = new URL(link.getAttribute('href'), location.href);
-    if (!['www.xiaohongshu.com', 'm.xiaohongshu.com'].includes(sourceUrl.hostname)) return null;
-    const id = sourceUrl.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1];
+    const host = sourceUrl.hostname;
+    const isXhs = ['www.xiaohongshu.com', 'm.xiaohongshu.com'].includes(host);
+    const isBili = ['www.bilibili.com', 'm.bilibili.com'].includes(host);
+    if (!isXhs && !isBili) return null;
+
+    let id = '';
+    if (isXhs) {
+      id = sourceUrl.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1] || '';
+    } else {
+      id = sourceUrl.pathname.match(/^\/video\/(BV[a-zA-Z0-9]{10}|av\d+)(?:\/|$)/i)?.[1] || '';
+    }
     if (!id) return null;
 
-    const card = link.closest('section, [class*="note-item"], [class*="feed-item"], [class*="note-card"]')
+    const card = link.closest('section, [class*="note-item"], [class*="feed-item"], [class*="note-card"], [class*="video-card"], [class*="bili-video-card"]')
       || link.parentElement?.parentElement?.parentElement;
     const title = card?.querySelector('[class*="title"]')?.textContent?.trim()
       || (link.textContent || '').trim()
@@ -70,7 +92,10 @@ function isNoteImageUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === 'https:'
-      && (url.hostname.endsWith('.xhscdn.com') || url.hostname.endsWith('.xhsimg.com'));
+      && (url.hostname.endsWith('.xhscdn.com')
+        || url.hostname.endsWith('.xhsimg.com')
+        || url.hostname === 'hdslb.com'
+        || url.hostname.endsWith('.hdslb.com'));
   } catch {
     return false;
   }
@@ -92,7 +117,10 @@ function collectImages() {
   const normalizedMetaImage = normalizeNoteImageUrl(metaImage);
   if (normalizedMetaImage) urls.add(normalizedMetaImage);
 
-  document.querySelectorAll('.note-content img, .swiper-slide img, [class*="note-content"] img, [class*="carousel"] img').forEach((image) => {
+  document.querySelectorAll(
+    '.note-content img, .swiper-slide img, [class*="note-content"] img, [class*="carousel"] img, '
+    + '.opus-content img, [class*="opus-content"] img, [class*="video-preview"] img',
+  ).forEach((image) => {
     const url = normalizeNoteImageUrl(imageUrlFromElement(image));
     if (url) urls.add(url);
   });
@@ -102,16 +130,71 @@ function collectImages() {
 
 function collectTags() {
   const tags = new Set();
-  document.querySelectorAll('#detail-desc a, .desc a, [class*="desc"] a').forEach((node) => {
+  document.querySelectorAll(
+    '#detail-desc a, .desc a, [class*="desc"] a, .tag-panel a, [class*="video-tag"] a, [class*="opus-tag"] a',
+  ).forEach((node) => {
     const value = node.textContent?.trim().replace(/^#/, '');
     if (value && value.length <= 40) tags.add(value);
   });
   return Array.from(tags).slice(0, 20);
 }
 
+function isBilibiliPage() {
+  return /(^|\.)bilibili\.com$/i.test(location.hostname);
+}
+
+function captureBilibiliNote() {
+  const id = getNoteId();
+  if (!id) throw new Error('请先打开一条 B 站视频或图文详情');
+
+  const title = cachedPageData?.title
+    || firstText(['h1', '.video-info-title', '.opus-title', '[class*="video-title"]'])
+    || metaContent('og:title').replace(/\s*[-_|].*哔哩哔哩.*$/i, '')
+    || document.title.replace(/\s*[-_|].*哔哩哔哩.*$/i, '');
+  const content = cachedPageData?.content
+    || firstText(['#v_desc', '.desc-info-text', '.opus-content', '[class*="desc"]'])
+    || metaContent('description')
+    || metaContent('og:description');
+  const imageUrls = collectImages();
+  const videoUrl = cachedPageData?.videoUrl
+    || (() => {
+      try {
+        const video = document.querySelector('video');
+        if (video?.src && /^https?:\/\//.test(video.src)) return video.src;
+        const source = document.querySelector('video source[src]');
+        if (source?.src && /^https?:\/\//.test(source.src)) return source.src;
+      } catch {
+        // no video on this page
+      }
+      return '';
+    })();
+
+  return {
+    id,
+    sourceUrl: location.href,
+    title,
+    content,
+    imageUrls,
+    coverUrl: imageUrls[0] || '',
+    videoUrl,
+    author: {
+      name: cachedPageData?.author?.name
+        || firstText(['.up-name', '.opus-author [class*="name"]', '[class*="up-info"] [class*="name"]'])
+        || metaContent('author'),
+      avatar: cachedPageData?.author?.avatar
+        || document.querySelector('.up-info img, [class*="up-info"] img, .opus-author img')?.src
+        || '',
+      userId: cachedPageData?.author?.userId || '',
+    },
+    tags: collectTags(),
+    type: document.querySelector('video') ? 'video' : 'normal',
+  };
+}
+
 function captureCurrentNote() {
   const id = getNoteId();
-  if (!id) throw new Error('请先打开一条小红书笔记详情');
+  if (!id) throw new Error('请先打开一条笔记详情');
+  if (isBilibiliPage()) return captureBilibiliNote();
 
   const title = cachedPageData?.title
     || firstText(['#detail-title', '.note-content .title', '[class*="note"] [class*="title"]'])
