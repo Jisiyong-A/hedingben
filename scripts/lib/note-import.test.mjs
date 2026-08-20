@@ -19,6 +19,15 @@ test('extractSharedNoteUrl finds a note URL inside copied text', () => {
   assert.equal(extractSharedNoteUrl(`这条不错 ${sourceUrl} 复制后打开`), sourceUrl);
 });
 
+test('extractSharedNoteUrl recognizes xhslink.cn short links', () => {
+  const shortUrl = 'https://xhslink.cn/o/8hQar8EEdkE';
+  assert.equal(
+    extractSharedNoteUrl('怪不得香磷说鸣人的查克拉像个小太阳呢？ https://xhslink.cn/o/8hQar8EEdkE 存好口令，直达【小红书】瞅瞅~'),
+    shortUrl
+  );
+  assert.equal(extractSharedNoteUrl(`复制这条信息 ${shortUrl} 打开小红书查看`), shortUrl);
+});
+
 test('extractNoteIdFromUrl supports current and legacy note paths', () => {
   assert.equal(extractNoteIdFromUrl(sourceUrl), '64cb12340000000001020304');
   assert.equal(

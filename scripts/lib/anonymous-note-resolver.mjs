@@ -2,7 +2,12 @@ const PAGE_HOSTS = new Set([
   'xiaohongshu.com',
   'www.xiaohongshu.com',
   'm.xiaohongshu.com',
+  'bilibili.com',
+  'www.bilibili.com',
 ]);
+// 小红书官方短链域名：分享链接形如 https://xhslink.cn/o/<code>，会 302 到真实笔记页。
+// B站短链域名：分享链接形如 https://b23.tv/<code>，会 302 到真实视频页。
+const SHORT_HOSTS = new Set(['xhslink.cn', 'b23.tv']);
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_REDIRECTS = 3;
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
@@ -21,8 +26,9 @@ function firstString(object, keys) {
 
 function assertAllowedPageUrl(value) {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || !PAGE_HOSTS.has(url.hostname.toLowerCase())) {
-    throw new Error('匿名解析器只允许访问小红书笔记页面');
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== 'https:' || !(PAGE_HOSTS.has(host) || SHORT_HOSTS.has(host))) {
+    throw new Error('匿名解析器只允许访问受支持的笔记页面');
   }
   return url;
 }
@@ -260,14 +266,54 @@ async function fetchAnonymousPage(sourceUrl, fetchImpl) {
   throw new Error('匿名解析失败');
 }
 
+/// 展开小红书官方短链（xhslink.cn）到真实笔记 URL；非短链原样返回。
+/// 只跟随重定向（最多 MAX_REDIRECTS 次），每跳校验目标必须是小红书允许域名，
+/// 避免被短链带往任意站点。
+async function expandShortUrl(value, fetchImpl) {
+  const initialUrl = assertAllowedPageUrl(value);
+  if (!SHORT_HOSTS.has(initialUrl.hostname.toLowerCase())) return initialUrl;
+
+  let currentUrl = initialUrl;
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    const response = await fetchImpl(currentUrl, {
+      method: 'GET',
+      redirect: 'manual',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+      },
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      if (redirectCount >= MAX_REDIRECTS) throw new Error('短链展开重定向次数过多');
+      const location = response.headers.get('location');
+      if (!location) throw new Error('短链展开缺少目标地址');
+      const next = assertAllowedPageUrl(new URL(location, currentUrl).toString());
+      // 跳到小红书正式域名即视为展开完成；仍为短链则继续跟随。
+      if (!SHORT_HOSTS.has(next.hostname.toLowerCase())) return next;
+      currentUrl = next;
+      continue;
+    }
+    if (!response.ok) throw new Error(`短链展开请求失败：${response.status}`);
+    // 短链服务通常只返回重定向；如果直接 200（很少见），按当前地址处理。
+    return currentUrl;
+  }
+
+  throw new Error('短链展开失败');
+}
+
 export async function resolveAnonymousNote(sourceUrl, options = {}) {
-  const pageUrl = assertAllowedPageUrl(sourceUrl);
+  const fetchImpl = options.fetchImpl || fetch;
+  const pageUrl = await expandShortUrl(sourceUrl, fetchImpl);
   const noteId = options.expectedNoteId || pageUrl.pathname
     .match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1];
   if (!noteId || !/^[0-9a-f]{24}$/i.test(noteId)) {
     throw new Error('匿名解析器没有识别到笔记 ID');
   }
 
-  const html = await fetchAnonymousPage(pageUrl.toString(), options.fetchImpl || fetch);
+  const html = await fetchAnonymousPage(pageUrl.toString(), fetchImpl);
   return notePayloadFromHtml(html, noteId.toLowerCase(), pageUrl.toString());
 }

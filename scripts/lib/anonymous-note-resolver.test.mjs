@@ -63,6 +63,54 @@ test('anonymous resolver keeps the dragged token but never sends account credent
   assert.deepEqual(note.tags, ['设计']);
 });
 
+test('anonymous resolver expands xhslink.cn short links before parsing', async () => {
+  const shortUrl = 'https://xhslink.cn/o/8hQar8EEdkE';
+  const requests = [];
+  const note = await resolveAnonymousNote(shortUrl, {
+    fetchImpl: async (url) => {
+      requests.push(url.toString());
+      if (url.toString().startsWith('https://xhslink.cn')) {
+        return new Response('', {
+          status: 302,
+          headers: { Location: sourceUrl },
+        });
+      }
+      return new Response(buildHtml(), {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      });
+    },
+  });
+
+  assert.deepEqual(requests, [shortUrl, sourceUrl]);
+  assert.equal(note.id, noteId);
+  assert.equal(note.title, '匿名解析标题');
+});
+
+test('anonymous resolver rejects a short link that redirects off-origin', async () => {
+  await assert.rejects(
+    resolveAnonymousNote('https://xhslink.cn/o/8hQar8EEdkE', {
+      fetchImpl: async () => new Response('', {
+        status: 302,
+        headers: { Location: 'https://evil.example.com/steal' },
+      }),
+    }),
+    /只允许访问受支持的笔记页面/,
+  );
+});
+
+test('anonymous resolver rejects a short link with too many redirects', async () => {
+  await assert.rejects(
+    resolveAnonymousNote('https://xhslink.cn/o/8hQar8EEdkE', {
+      fetchImpl: async () => new Response('', {
+        status: 302,
+        headers: { Location: 'https://xhslink.cn/o/loop' },
+      }),
+    }),
+    /重定向次数过多|只允许访问受支持的笔记页面/,
+  );
+});
+
 test('anonymous resolver refuses to leave the Xiaohongshu page origin on redirect', async () => {
   await assert.rejects(
     resolveAnonymousNote(sourceUrl, {
@@ -72,7 +120,7 @@ test('anonymous resolver refuses to leave the Xiaohongshu page origin on redirec
         headers: { Location: 'https://example.com/collect-account' },
       }),
     }),
-    /只允许访问小红书笔记页面/,
+    /只允许访问受支持的笔记页面/,
   );
 });
 
