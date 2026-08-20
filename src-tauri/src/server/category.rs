@@ -68,10 +68,10 @@ fn build_rules() -> Vec<CategoryRule> {
         CategoryRule {
             category: "影像创作",
             strong: vec![
-                re(r"摄影|分镜|电影|镜头|胶片|画面|构图|色彩|视觉叙事|影像|视频剪辑|动画|短片|可灵|veo|海螺|ray2|游戏制作|steam"),
+                re(r"摄影|分镜|电影|镜头|胶片|画面|构图|色彩|视觉叙事|影像|视频剪辑|动画|短片|可灵|veo|海螺|ray2|游戏制作|steam|UP主|弹幕|番剧|鬼畜|虚拟主播|动漫|声优|混剪|二创|MAD|AMV|翻唱|翻跳|手书|同人"),
             ],
-            weak: vec![re(r"叙事|故事|画幅|拍摄|视频|游戏")],
-            tag_boost: vec![re(r"摄影|电影|镜头|影像|分镜|动画|短片|游戏")],
+            weak: vec![re(r"叙事|故事|画幅|拍摄|视频|游戏|追番|新番|投稿|投币|一键三连")],
+            tag_boost: vec![re(r"摄影|电影|镜头|影像|分镜|动画|短片|游戏|番剧|鬼畜|动漫|UP主|弹幕")],
         },
         CategoryRule {
             category: "方法论",
