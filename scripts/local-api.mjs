@@ -14,6 +14,7 @@ import { localizeNoteMedia } from './lib/media-import.mjs';
 import { probeLocalOcr } from './ocr/index.mjs';
 import * as platform from './platform/index.mjs';
 import { resolveAnonymousNote } from './lib/anonymous-note-resolver.mjs';
+import { resolveBilibiliNote } from './lib/bilibili-resolver.mjs';
 import { classifyWithAI } from './lib/ai-classifier.mjs';
 import {
   extractNoteIdFromUrl,
@@ -449,23 +450,43 @@ async function importNote(body = {}) {
   if (draggedPayload) {
     normalized = normalizeImportedNote(draggedPayload);
   } else if (draggedCard) {
-    const resolved = await resolveAnonymousNote(draggedCard.sourceUrl, {
-      expectedNoteId: draggedCard.id,
-    });
+    const urlHost = new URL(draggedCard.sourceUrl).hostname.toLowerCase();
+    const isBiliCard = /bilibili\.com$/i.test(urlHost) || /b23\.tv$/i.test(urlHost);
+    const resolved = isBiliCard
+      ? await resolveBilibiliNote(draggedCard.sourceUrl, { dataDirectory })
+      : await resolveAnonymousNote(draggedCard.sourceUrl, {
+          expectedNoteId: draggedCard.id,
+        });
     normalized = normalizeImportedNote({
       ...resolved,
       title: resolved.title || draggedCard.title,
     });
   } else {
+    // 分享文本：优先 URL 匿名解析拿完整内容
+    // （resolver 内部负责展开短链并提取 note id），
+    // 解析失败（风控/网络）再回退共享文本（至少保留标题与链接）。
     try {
-      normalized = noteFromSharedText(body.input);
-    } catch (error) {
       const sourceUrl = extractSharedNoteUrl(body.input);
-      const noteId = extractNoteIdFromUrl(sourceUrl);
-      if (!noteId) throw error;
-      normalized = normalizeImportedNote(await resolveAnonymousNote(sourceUrl, {
-        expectedNoteId: noteId,
-      }));
+      const urlHost = new URL(sourceUrl).hostname.toLowerCase();
+      const isBiliShare = /bilibili\.com$/i.test(urlHost) || /b23\.tv$/i.test(urlHost);
+      if (isBiliShare) {
+        normalized = normalizeImportedNote(
+          await resolveBilibiliNote(sourceUrl, {
+            dataDirectory,
+            sharedText: body.input,
+          }),
+        );
+      } else {
+        normalized = normalizeImportedNote(
+          await resolveAnonymousNote(sourceUrl, {}),
+        );
+      }
+    } catch (error) {
+      try {
+        normalized = noteFromSharedText(body.input);
+      } catch {
+        throw error;
+      }
     }
   }
   const imported = await localizeNoteMedia(normalized, {
