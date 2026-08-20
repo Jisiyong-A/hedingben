@@ -744,12 +744,14 @@ export function DeskView() {
         <MobileNavBar
           active={mobileNavActive}
           onLibrary={() => {
+            if (expanded) setExpanded(null);
             setSearchQuery('');
             setActiveGroup(null);
             setActiveCategory(null);
             containerRef.current?.scrollTo({ top: 0 });
           }}
           onSearch={() => {
+            if (expanded) setExpanded(null);
             const input = document.querySelector<HTMLInputElement>('input[aria-label="搜索收藏"]');
             input?.focus();
             input?.scrollIntoView({ behavior: 'smooth', block: 'center' });

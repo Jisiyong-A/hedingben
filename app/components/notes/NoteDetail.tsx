@@ -319,7 +319,7 @@ export function NoteDetail({
                   </Button>
                   <Button onClick={openSourceUrl} disabled={!note.sourceUrl} style={{ color: 'var(--text-dim)' }}>
                     <ExternalLink size={12} />
-                    去小红书查看
+                    {note.source === 'bilibili' ? '去B站查看' : '去小红书查看'}
                   </Button>
                 </>
               )}
@@ -357,11 +357,11 @@ export function NoteDetail({
               仅保留首图和链接
             </span>
             <span style={{ fontSize: 12.5, color: 'var(--text-dim)', textAlign: 'center' }}>
-              本地视频已删除，可去小红书原帖查看
+              {note.source === 'bilibili' ? '可去B站原帖查看' : '可去小红书原帖查看'}
             </span>
             <Button onClick={openSourceUrl} disabled={!note.sourceUrl}>
               <ExternalLink size={12} />
-              去小红书查看
+              {note.source === 'bilibili' ? '去B站查看' : '去小红书查看'}
             </Button>
           </div>
         ) : (

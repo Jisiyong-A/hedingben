@@ -584,11 +584,14 @@ function queueNoteVideoDelete(noteId) {
 }
 
 async function sendMediaFile(request, response, pathname) {
-  // XHS note IDs are typically 22-26 hex chars (varies by generation)
-  const match = pathname.match(/^\/media\/([0-9a-f]{20,26})\/((?:\d{2}\.(?:avif|gif|heic|heif|jpg|png|webp))|video\.mp4)$/i);
+  // XHS: 20-26 hex; B站: BV(10 alnum, 大小写敏感)/av数字/opus数字 — 与 note-import 保持一致
+  const match = pathname.match(/^\/media\/((?:[0-9a-f]{20,26}|BV[a-zA-Z0-9]{10}|av\d+|\d+))\/((?:\d{2}\.(?:avif|gif|heic|heif|jpg|png|webp))|video\.mp4)$/i);
   if (!match) return false;
 
-  const filePath = path.join(mediaDirectory, match[1].toLowerCase(), match[2].toLowerCase());
+  const rawId = match[1];
+  const isBvId = /^BV/i.test(rawId);
+  const normalizedId = isBvId ? rawId : rawId.toLowerCase();
+  const filePath = path.join(mediaDirectory, normalizedId, match[2].toLowerCase());
   try {
     const stat = await fsStat(filePath);
     const contentType = mediaContentTypes.get(path.extname(filePath)) || 'application/octet-stream';
@@ -722,9 +725,11 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    const deleteNoteMatch = url.pathname.match(/^\/notes\/([0-9a-f]{24})$/i);
+    const deleteNoteMatch = url.pathname.match(/^\/notes\/((?:[0-9a-f]{20,26}|BV[a-zA-Z0-9]{10}|av\d+|\d+))$/i);
     if (request.method === 'DELETE' && deleteNoteMatch) {
-      const result = await queueNoteDelete(deleteNoteMatch[1].toLowerCase());
+      const rawId = deleteNoteMatch[1];
+      const noteId = /^BV/i.test(rawId) ? rawId : rawId.toLowerCase();
+      const result = await queueNoteDelete(noteId);
       if (!result) {
         sendJson(request, response, 404, { ok: false, error: '笔记不存在或已被删除' });
         return;
@@ -733,9 +738,11 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    const deleteNoteVideoMatch = url.pathname.match(/^\/notes\/([0-9a-f]{24})\/video\/delete$/i);
+    const deleteNoteVideoMatch = url.pathname.match(/^\/notes\/((?:[0-9a-f]{20,26}|BV[a-zA-Z0-9]{10}|av\d+|\d+))\/video\/delete$/i);
     if (request.method === 'POST' && deleteNoteVideoMatch) {
-      const result = await queueNoteVideoDelete(deleteNoteVideoMatch[1].toLowerCase());
+      const rawId = deleteNoteVideoMatch[1];
+      const noteId = /^BV/i.test(rawId) ? rawId : rawId.toLowerCase();
+      const result = await queueNoteVideoDelete(noteId);
       if (!result) {
         sendJson(request, response, 404, { ok: false, error: '笔记不存在或已被删除' });
         return;

@@ -20,7 +20,8 @@ function extractCachedUrl(buffer) {
 function stableImageKey(value) {
   try {
     const url = new URL(value);
-    if (!url.hostname.endsWith('.xhscdn.com') && !url.hostname.endsWith('.xhsimg.com')) return '';
+    if (!url.hostname.endsWith('.xhscdn.com') && !url.hostname.endsWith('.xhsimg.com')
+      && !url.hostname.endsWith('.hdslb.com') && url.hostname !== 'hdslb.com' && !url.hostname.endsWith('.bilibili.com')) return '';
     return decodeURIComponent(url.pathname.split('/').pop() || '').split('!')[0];
   } catch {
     return '';

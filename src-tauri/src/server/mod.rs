@@ -462,9 +462,8 @@ async fn handle_ocr_update(
     Path(note_id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
-    let note_id = note_id.to_ascii_lowercase();
-    if !id_pattern.is_match(&note_id) {
+    let note_id = normalize_note_id(&note_id);
+    if !is_valid_note_id(&note_id) {
         return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
     }
     let parsed = match read_json_body(body).await {
@@ -495,9 +494,9 @@ async fn handle_ocr_update(
     ok_json(json!({"ok": true, "noteId": note_id}))
 }
 
-async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<String>) -> Response {    let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
-    let note_id = note_id.to_ascii_lowercase();
-    if !id_pattern.is_match(&note_id) {
+async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<String>) -> Response {
+    let note_id = normalize_note_id(&note_id);
+    if !is_valid_note_id(&note_id) {
         return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
     }
 
@@ -521,11 +520,22 @@ async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<Str
     }))
 }
 
-/// 校验笔记 ID 格式（小红书 note id：20-26 位十六进制，调用方需先小写化）。
+/// 校验笔记 ID 格式（XHS 20-26 hex 仅小写；B站 BV/av/opus）。
 fn is_valid_note_id(note_id: &str) -> bool {
     static ID_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let id_pattern = ID_PATTERN.get_or_init(|| regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap());
+    let id_pattern = ID_PATTERN.get_or_init(|| {
+        regex::Regex::new(r"^(?:[0-9a-f]{20,26}|[Bb][Vv][a-zA-Z0-9]{10}|[Aa][Vv]\d+|\d+)$").unwrap()
+    });
     id_pattern.is_match(note_id)
+}
+
+/// 归一化笔记 ID：BV 大小写敏感保持原样，其余转小写（与 JS 侧逐行等价）。
+fn normalize_note_id(raw: &str) -> String {
+    if raw.len() >= 2 && raw[..2].eq_ignore_ascii_case("BV") {
+        raw.to_string()
+    } else {
+        raw.to_ascii_lowercase()
+    }
 }
 
 /// 把「用户已删除本地视频」的状态写进 note。幂等：videoLocalPath 已为空也照常返回。
@@ -538,7 +548,7 @@ fn apply_video_delete(note: &mut Value) {
 /// POST /notes/{id}/video/delete —— 删除本地已下载的视频文件并标记笔记状态。
 /// 幂等：文件不存在或 videoLocalPath 已为空都正常返回 ok。
 async fn handle_video_delete(State(state): State<ServerState>, Path(note_id): Path<String>) -> Response {
-    let note_id = note_id.to_ascii_lowercase();
+    let note_id = normalize_note_id(&note_id);
     if !is_valid_note_id(&note_id) {
         return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
     }
@@ -586,13 +596,13 @@ async fn handle_media(
     headers: HeaderMap,
     Path((note_id, file)): Path<(String, String)>,
 ) -> Response {
-    let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
+    let note_id = normalize_note_id(&note_id);
     let file_pattern = regex::Regex::new(r"(?i)^(?:\d{2}\.(?:avif|gif|heic|heif|jpg|png|webp)|video\.mp4)$").unwrap();
-    if !id_pattern.is_match(&note_id) || !file_pattern.is_match(&file) {
+    if !is_valid_note_id(&note_id) || !file_pattern.is_match(&file) {
         return error_json(StatusCode::NOT_FOUND, "Media not found");
     }
 
-    let file_path = state.media_directory.join(note_id.to_ascii_lowercase()).join(file.to_ascii_lowercase());
+    let file_path = state.media_directory.join(&note_id).join(file.to_ascii_lowercase());
     let metadata = match tokio::fs::metadata(&file_path).await {
         Ok(metadata) => metadata,
         Err(_) => return error_json(StatusCode::NOT_FOUND, "Media not found"),
