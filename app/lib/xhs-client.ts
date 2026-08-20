@@ -129,6 +129,7 @@ function normalizeNote(note: Partial<Note>): Note {
 
   return {
     id: note.id || `${Date.now()}-${Math.random()}`,
+    source: note.source === 'bilibili' ? 'bilibili' : 'xhs',
     xsecToken: note.xsecToken,
     sourceUrl: note.sourceUrl,
     title: note.title || '未命名笔记',
@@ -141,6 +142,9 @@ function normalizeNote(note: Partial<Note>): Note {
     imageOcr: Array.isArray(note.imageOcr) ? note.imageOcr : [],
     mediaStatus: note.mediaStatus,
     mediaError: note.mediaError,
+    videoUrl: note.videoUrl,
+    videoLocalPath: note.videoLocalPath,
+    videoError: note.videoError,
     author: {
       name: note.author?.name || '未知作者',
       avatar: note.author?.avatar,
@@ -154,6 +158,13 @@ function normalizeNote(note: Partial<Note>): Note {
     tags: Array.isArray(note.tags) ? note.tags : [],
     type: note.type === 'video' ? 'video' : 'normal',
     imageAspect: note.imageAspect,
+    ...(note.source === 'bilibili' && {
+      bvid: note.bvid || undefined,
+      aid: typeof note.aid === 'number' ? note.aid : undefined,
+      cid: typeof note.cid === 'number' ? note.cid : undefined,
+      opusId: note.opusId || undefined,
+      b23ShortUrl: note.b23ShortUrl || undefined,
+    }),
   };
 }
 
