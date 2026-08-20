@@ -11,11 +11,16 @@ const REQUEST_TIMEOUT_MS: u64 = 20_000;
 const MAX_REDIRECTS: u32 = 3;
 const MAX_HTML_BYTES: usize = 5 * 1024 * 1024;
 
-const PAGE_HOSTS: [&str; 3] = [
+const PAGE_HOSTS: [&str; 5] = [
     "xiaohongshu.com",
     "www.xiaohongshu.com",
     "m.xiaohongshu.com",
+    "bilibili.com",
+    "www.bilibili.com",
 ];
+
+/// 短链域名：小红书 xhslink.cn / B站 b23.tv，会 302 到真实页面。
+const SHORT_HOSTS: [&str; 2] = ["xhslink.cn", "b23.tv"];
 
 const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
 
@@ -37,7 +42,9 @@ fn assert_allowed_page_url(value: &str) -> Result<Url, String> {
     let url = Url::parse(value).map_err(|_| "匿名解析器只允许访问小红书笔记页面".to_string())?;
     let scheme_ok = url.scheme() == "https";
     let host = url.host_str().unwrap_or("");
-    if !scheme_ok || !PAGE_HOSTS.contains(&host.to_ascii_lowercase().as_str()) {
+    let host_lower = host.to_ascii_lowercase();
+    let allowed = PAGE_HOSTS.contains(&host_lower.as_str()) || SHORT_HOSTS.contains(&host_lower.as_str());
+    if !scheme_ok || !allowed {
         return Err("匿名解析器只允许访问小红书笔记页面".to_string());
     }
     Ok(url)
@@ -383,11 +390,61 @@ async fn fetch_anonymous_page(source_url: &Url, client: &reqwest::Client) -> Res
     Err("匿名解析失败".to_string())
 }
 
+/// 展开小红书官方短链（xhslink.cn）到真实笔记 URL；非短链原样返回。
+/// 只跟随重定向（最多 MAX_REDIRECTS 次），每跳校验目标必须是小红书允许域名。
+async fn expand_short_url(source_url: &str, client: &reqwest::Client) -> Result<Url, String> {
+    let initial_url = assert_allowed_page_url(source_url)?;
+    let host = initial_url.host_str().unwrap_or("").to_ascii_lowercase();
+    if !SHORT_HOSTS.contains(&host.as_str()) {
+        return Ok(initial_url);
+    }
+
+    let mut current_url = initial_url;
+    for redirect_count in 0..=MAX_REDIRECTS {
+        let response = client
+            .get(current_url.clone())
+            .send()
+            .await
+            .map_err(|err| format!("短链展开请求失败：{err}"))?;
+
+        let status = response.status();
+        if status.is_redirection() {
+            if redirect_count >= MAX_REDIRECTS {
+                return Err("短链展开重定向次数过多".to_string());
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| "短链展开缺少目标地址".to_string())?;
+            let next = current_url
+                .join(location)
+                .map_err(|_| "短链展开缺少目标地址".to_string())?;
+            let next = assert_allowed_page_url(&next.to_string())?;
+            let next_host = next.host_str().unwrap_or("").to_ascii_lowercase();
+            // 跳到小红书正式域名即视为展开完成；仍为短链则继续跟随。
+            if !SHORT_HOSTS.contains(&next_host.as_str()) {
+                return Ok(next);
+            }
+            current_url = next;
+            continue;
+        }
+        if !status.is_success() {
+            return Err(format!("短链展开请求失败：{}", status.as_u16()));
+        }
+        // 短链服务通常只返回重定向；如果直接 200（很少见），按当前地址处理。
+        return Ok(current_url);
+    }
+
+    Err("短链展开失败".to_string())
+}
+
 pub async fn resolve_anonymous_note(
     source_url: &str,
     expected_note_id: Option<&str>,
 ) -> Result<Value, String> {
-    let page_url = assert_allowed_page_url(source_url)?;
+    let client = anonymous_client()?;
+    let page_url = expand_short_url(source_url, &client).await?;
     let note_id = match expected_note_id {
         Some(id) => id.to_string(),
         None => page_url
@@ -410,7 +467,6 @@ pub async fn resolve_anonymous_note(
         return Err("匿名解析器没有识别到笔记 ID".to_string());
     }
 
-    let client = anonymous_client()?;
     let html = fetch_anonymous_page(&page_url, &client).await?;
     note_payload_from_html(&html, &note_id.to_ascii_lowercase(), &page_url.to_string())
 }
@@ -484,6 +540,11 @@ mod tests {
         assert!(err.contains("只允许访问"));
         let err = assert_allowed_page_url("http://www.xiaohongshu.com/explore/abc").unwrap_err();
         assert!(err.contains("只允许访问"));
+    }
+
+    #[test]
+    fn allows_xhslink_short_host() {
+        assert!(assert_allowed_page_url("https://xhslink.cn/o/8hQar8EEdkE").is_ok());
     }
 
     #[test]

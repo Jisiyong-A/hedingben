@@ -8,10 +8,15 @@ use url::Url;
 const DRAG_PAYLOAD_PREFIX: &str = "SHOUCANG_NOTE:";
 const CARD_DRAG_PAYLOAD_PREFIX: &str = "SHOUCANG_CARD:";
 
-const ALLOWED_HOSTS: [&str; 3] = [
+const ALLOWED_HOSTS: [&str; 8] = [
     "xiaohongshu.com",
     "www.xiaohongshu.com",
     "m.xiaohongshu.com",
+    "xhslink.cn",
+    "bilibili.com",
+    "www.bilibili.com",
+    "m.bilibili.com",
+    "b23.tv",
 ];
 
 fn is_allowed_host(hostname: &str) -> bool {
@@ -57,16 +62,30 @@ pub fn extract_note_id_from_url(value: &str) -> Option<String> {
 
 fn extract_note_id_from_path(path: &str) -> Option<String> {
     // 注意：Rust regex 的 `$` 在文本末尾匹配；JS 的 `(?:\/|$)` 也覆盖无尾斜杠情况。
+    // BV id 是 base58 编码、大小写敏感；XHS hex id 与 av/opus 数字 id 均转小写。
     let patterns = [
         r#"^/explore/([0-9a-f]{20,26})(?:/|$)"#,
         r#"^/search_result/([0-9a-f]{20,26})(?:/|$)"#,
         r#"^/discovery/item/([0-9a-f]{20,26})(?:/|$)"#,
+        // Bilibili video (BV id is 10 alphanumeric chars, case-sensitive).
+        r#"^/video/(BV[a-zA-Z0-9]{10})(?:/|$)"#,
+        // Bilibili legacy av id.
+        r#"^/video/(av\d+)(?:/|$)"#,
+        // Bilibili opus (article) id.
+        r#"^/opus/(\d+)(?:/|$)"#,
     ];
     for pattern in patterns {
         let re = regex::Regex::new(pattern).unwrap();
         if let Some(captures) = re.captures(path) {
             if let Some(id) = captures.get(1) {
-                return Some(id.as_str().to_ascii_lowercase());
+                let raw = id.as_str();
+                // BV ids are base58-encoded and case-sensitive; keep as-is.
+                // XHS hex ids and numeric ids are lowercased.
+                return Some(if raw.starts_with("BV") || raw.starts_with("bv") {
+                    raw.to_string()
+                } else {
+                    raw.to_ascii_lowercase()
+                });
             }
         }
     }
@@ -165,17 +184,57 @@ pub fn normalize_imported_note(payload: &Value) -> Result<Value, String> {
     }
 
     let shared_url = extract_shared_note_url(&clean_text(&payload["sourceUrl"], 5000))?;
-    let mut source_url = Url::parse(&shared_url).map_err(|_| "没有识别到有效的小红书笔记链接".to_string())?;
-    source_url.set_query(None);
-    source_url.set_fragment(None);
-    let source_url = source_url.to_string();
+    let mut source_url_obj =
+        Url::parse(&shared_url).map_err(|_| "没有识别到有效的小红书笔记链接".to_string())?;
+    let host = source_url_obj
+        .host_str()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let is_bilibili = host.ends_with("bilibili.com");
+    source_url_obj.set_query(None);
+    source_url_obj.set_fragment(None);
+    let source_url = source_url_obj.to_string();
 
+    // fallback 取 payload.id 但不转小写，与 JS 侧逐行等价
     let note_id = extract_note_id_from_url(&source_url)
-        .unwrap_or_else(|| clean_text(&payload["id"], 100).to_ascii_lowercase());
-    let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
-    if !id_pattern.is_match(&note_id) {
-        return Err("当前页面不是可识别的小红书笔记".to_string());
+        .unwrap_or_else(|| clean_text(&payload["id"], 100));
+
+    if is_bilibili {
+        let bilibili_re = regex::Regex::new(r"^(BV[a-zA-Z0-9]{10}|av\d+|\d+)$").unwrap();
+        if !bilibili_re.is_match(&note_id) {
+            return Err("当前页面不是可识别的B站内容".to_string());
+        }
+    } else {
+        let id_pattern = regex::Regex::new(r"^[0-9a-f]{20,26}$").unwrap();
+        if !id_pattern.is_match(&note_id) {
+            return Err("当前页面不是可识别的小红书笔记".to_string());
+        }
     }
+
+    // BV id 大小写敏感保持原样，其余转小写（与 JS 侧逐行等价）
+    let final_id = if is_bilibili && (note_id.starts_with("BV") || note_id.starts_with("bv")) {
+        note_id.clone()
+    } else {
+        note_id.to_ascii_lowercase()
+    };
+
+    // bilibili 可选字段
+    let bvid: Option<String> = if is_bilibili && (note_id.starts_with("BV") || note_id.starts_with("bv")) {
+        Some(note_id.clone())
+    } else {
+        None
+    };
+    let aid: Option<String> = if is_bilibili && note_id.starts_with("av") {
+        Some(note_id[2..].to_string())
+    } else {
+        None
+    };
+    let cid: Option<String> = None;
+    let opus_id: Option<String> = if is_bilibili && !note_id.is_empty() && note_id.bytes().all(|b| b.is_ascii_digit()) {
+        Some(note_id.clone())
+    } else {
+        None
+    };
 
     let title = {
         let t = clean_text(&payload["title"], 300);
@@ -225,7 +284,8 @@ pub fn normalize_imported_note(payload: &Value) -> Result<Value, String> {
     let now = chrono_now_iso();
 
     Ok(json!({
-        "id": note_id.to_ascii_lowercase(),
+        "id": final_id,
+        "source": if is_bilibili { "bilibili" } else { "xhs" },
         "sourceUrl": source_url,
         "title": title,
         "content": content,
@@ -250,6 +310,10 @@ pub fn normalize_imported_note(payload: &Value) -> Result<Value, String> {
         "savedAt": now,
         "tags": tags,
         "type": note_type,
+        "bvid": bvid,
+        "aid": aid,
+        "cid": cid,
+        "opusId": opus_id,
     }))
 }
 
@@ -416,6 +480,13 @@ mod tests {
         let input = "复制这条信息，打开小红书：https://www.xiaohongshu.com/explore/abcdef0123456789abcdef?xsec_token=abc 查看";
         let url = extract_shared_note_url(input).unwrap();
         assert!(url.contains("abcdef0123456789abcdef"));
+    }
+
+    #[test]
+    fn extract_shared_url_recognizes_xhslink_short_link() {
+        let input = "怪不得香磷说鸣人的查克拉像个小太阳呢？ https://xhslink.cn/o/8hQar8EEdkE 存好口令，直达【小红书】瞅瞅~";
+        let url = extract_shared_note_url(input).unwrap();
+        assert_eq!(url, "https://xhslink.cn/o/8hQar8EEdkE");
     }
 
     #[test]

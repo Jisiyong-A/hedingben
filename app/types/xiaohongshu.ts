@@ -1,5 +1,6 @@
 export interface Note {
   id: string;
+  source?: 'xhs' | 'bilibili';
   xsecToken?: string;
   sourceUrl?: string;
   title: string;
@@ -32,6 +33,11 @@ export interface Note {
   videoLocalPath?: string;
   videoError?: string;
   imageAspect?: 'tall' | 'medium' | 'short' | 'normal';
+  bvid?: string;
+  aid?: number;
+  cid?: number;
+  opusId?: string;
+  b23ShortUrl?: string;
 }
 
 export interface XHSUser {
