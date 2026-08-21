@@ -85,3 +85,13 @@ if (fs.existsSync(modelSrc)) {
 } else {
   console.log('[android-assets] no public/models (semantic model not bundled)');
 }
+
+// 浏览器扩展同步到 Android assets（供 ExtensionBridge 下载到 Downloads）
+const extSrc = path.join(root, 'browser-extension');
+const extDst = path.join(root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'assets', 'browser-extension');
+if (fs.existsSync(extSrc)) {
+  const count = copyDir(extSrc, extDst);
+  console.log(`[android-assets] browser-extension synced to assets/browser-extension (${count} files)`);
+} else {
+  console.log('[android-assets] no browser-extension (skip)');
+}

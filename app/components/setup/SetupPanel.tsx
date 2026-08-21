@@ -181,90 +181,130 @@ export function SetupPanel({
                 </Panel>
               </section>
 
-              {/* BROWSER BRIDGE */}
-              <section aria-label="浏览器桥">
-                <MatrixLabel style={{ display: 'block', marginBottom: 4 }}>BROWSER BRIDGE</MatrixLabel>
-                <Panel radius="var(--radius-3)" style={{ padding: '12px 14px', marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <StatusLight
-                        state={info?.extension.connected ? 'ok' : info?.extension.available ? 'idle' : 'error'}
-                        blink={!info?.extension.connected && Boolean(info?.extension.available)}
-                      />
-                      <Badge tone={info?.extension.connected ? 'ok' : info?.extension.available ? 'default' : 'error'}>
-                        {!info?.extension.available
-                          ? 'NOT INSTALLED'
-                          : info?.extension.connected
-                            ? 'CONNECTED'
-                            : 'READY TO INSTALL'}
-                      </Badge>
+              {/* BROWSER BRIDGE — 桌面：原逻辑不变；移动端(Android)：下载到 Downloads */}
+              {health?.platform === 'android' ? (
+                <section aria-label="浏览器桥">
+                  <MatrixLabel style={{ display: 'block', marginBottom: 4 }}>BROWSER BRIDGE</MatrixLabel>
+                  <Panel radius="var(--radius-3)" style={{ padding: '12px 14px', marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, lineHeight: 1.7, color: 'var(--text-dim)' }}>
+                      将扩展下载到 <span style={{ color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>Downloads/ShouCangExtension</span>，
+                      再到 Chrome 打开 <span style={{ color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>chrome://extensions</span> → 开发者模式 → 加载已解压的扩展程序 → 选择该文件夹。
                     </div>
-                    <Badge>v{info?.extension.version || '?'}</Badge>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                    <Button
-                      size="sm"
-                      onClick={() => onOpenExtension('chrome')}
-                      disabled={!info?.extension.available || !info?.extension.browsers?.chrome}
-                    >
-                      OPEN CHROME SETUP
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => onOpenExtension('edge')}
-                      disabled={!info?.extension.available || !info?.extension.browsers?.edge}
-                    >
-                      OPEN EDGE SETUP
-                    </Button>
-                    <Button size="sm" onClick={() => onOpenExtension()} disabled={!info?.extension.available}>
-                      OPEN EXTENSION FOLDER
-                    </Button>
-                  </div>
-                  <ol
-                    style={{
-                      margin: '12px 0 0',
-                      paddingLeft: 18,
-                      color: 'var(--text-faint)',
-                      fontSize: 11,
-                      lineHeight: 1.9,
-                    }}
-                  >
-                    <li>打开开发者模式</li>
-                    <li>加载已解压的扩展程序</li>
-                    <li>选择刚打开的文件夹</li>
-                  </ol>
-                  {!info?.extension.browsers?.chrome && !info?.extension.browsers?.edge && (
-                    <div
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const bridge = (
+                              window as unknown as {
+                                ExtensionBridge?: { downloadExtension: () => string };
+                              }
+                            ).ExtensionBridge;
+                            if (!bridge) throw new Error('Bridge not ready');
+                            const res = bridge.downloadExtension();
+                            // 形如 ok:/storage/... 或 error:msg
+                            if (res.startsWith('ok:')) {
+                              alert(`已保存到 ${res.slice(3)}\n请到 chrome://extensions 加载`);
+                            } else {
+                              alert(`下载失败: ${res}`);
+                            }
+                          } catch (e) {
+                            alert(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
+                          }
+                        }}
+                      >
+                        DOWNLOAD EXTENSION TO DOWNLOADS
+                      </Button>
+                    </div>
+                  </Panel>
+                </section>
+              ) : (
+                <section aria-label="浏览器桥">
+                  <MatrixLabel style={{ display: 'block', marginBottom: 4 }}>BROWSER BRIDGE</MatrixLabel>
+                  <Panel radius="var(--radius-3)" style={{ padding: '12px 14px', marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <StatusLight
+                          state={info?.extension.connected ? 'ok' : info?.extension.available ? 'idle' : 'error'}
+                          blink={!info?.extension.connected && Boolean(info?.extension.available)}
+                        />
+                        <Badge tone={info?.extension.connected ? 'ok' : info?.extension.available ? 'default' : 'error'}>
+                          {!info?.extension.available
+                            ? 'NOT INSTALLED'
+                            : info?.extension.connected
+                              ? 'CONNECTED'
+                              : 'READY TO INSTALL'}
+                        </Badge>
+                      </div>
+                      <Badge>v{info?.extension.version || '?'}</Badge>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                      <Button
+                        size="sm"
+                        onClick={() => onOpenExtension('chrome')}
+                        disabled={!info?.extension.available || !info?.extension.browsers?.chrome}
+                      >
+                        OPEN CHROME SETUP
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => onOpenExtension('edge')}
+                        disabled={!info?.extension.available || !info?.extension.browsers?.edge}
+                      >
+                        OPEN EDGE SETUP
+                      </Button>
+                      <Button size="sm" onClick={() => onOpenExtension()} disabled={!info?.extension.available}>
+                        OPEN EXTENSION FOLDER
+                      </Button>
+                    </div>
+                    <ol
                       style={{
-                        marginTop: 10,
-                        padding: '8px 10px',
-                        borderRadius: 'var(--radius-2)',
-                        border: '1px solid var(--warning)',
-                        color: 'var(--warning)',
+                        margin: '12px 0 0',
+                        paddingLeft: 18,
+                        color: 'var(--text-faint)',
                         fontSize: 11,
-                        fontFamily: 'var(--font-mono)',
+                        lineHeight: 1.9,
                       }}
                     >
-                      未检测到 Chrome / Edge，请手动打开扩展页
-                    </div>
-                  )}
-                </Panel>
-              </section>
+                      <li>打开开发者模式</li>
+                      <li>加载已解压的扩展程序</li>
+                      <li>选择刚打开的文件夹</li>
+                    </ol>
+                    {!info?.extension.browsers?.chrome && !info?.extension.browsers?.edge && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-2)',
+                          border: '1px solid var(--warning)',
+                          color: 'var(--warning)',
+                          fontSize: 11,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        未检测到 Chrome / Edge，请手动打开扩展页
+                      </div>
+                    )}
+                  </Panel>
+                </section>
+              )}
 
-              {/* AGENT BRIDGE */}
-              <section aria-label="Agent MCP">
-                <MatrixLabel style={{ display: 'block', marginBottom: 4 }}>AGENT BRIDGE</MatrixLabel>
-                <Panel radius="var(--radius-3)" style={{ padding: '2px 14px', marginBottom: 16 }}>
-                  <AgentPanel
-                    info={info}
-                    connectingClient={connectingClient}
-                    connectedClients={connectedClients}
-                    onConnectAgent={onConnectAgent}
-                    onRepairAgent={onConnectAgent}
-                    message={message}
-                  />
-                </Panel>
-              </section>
+              {/* AGENT BRIDGE — 移动端不展示（health.platform === 'android' 时隐藏） */}
+              {health?.platform !== 'android' && (
+                <section aria-label="Agent MCP">
+                  <MatrixLabel style={{ display: 'block', marginBottom: 4 }}>AGENT BRIDGE</MatrixLabel>
+                  <Panel radius="var(--radius-3)" style={{ padding: '2px 14px', marginBottom: 16 }}>
+                    <AgentPanel
+                      info={info}
+                      connectingClient={connectingClient}
+                      connectedClients={connectedClients}
+                      onConnectAgent={onConnectAgent}
+                      onRepairAgent={onConnectAgent}
+                      message={message}
+                    />
+                  </Panel>
+                </section>
+              )}
 
               {/* ABOUT / LICENSE */}
               <section aria-label="关于">

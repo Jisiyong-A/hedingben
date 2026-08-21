@@ -97,8 +97,8 @@ export function ImportDropzone({
               animate={{ scale: 1, y: 0 }}
               transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
               style={{
-                minWidth: 320,
-                maxWidth: 520,
+                width: 'min(520px, calc(100vw - 32px))',
+                maxWidth: 'calc(100vw - 32px)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 14,
@@ -106,9 +106,10 @@ export function ImportDropzone({
                 borderRadius: 'var(--radius-6)',
                 background: 'var(--surface)',
                 border: feedback.phase === 'error' ? '1px solid var(--accent)' : 'var(--border-strong)',
+                boxSizing: 'border-box',
               }}
             >
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div
                   style={{
                     fontFamily: 'var(--font-mono)',
@@ -116,15 +117,26 @@ export function ImportDropzone({
                     fontWeight: 600,
                     letterSpacing: '0.06em',
                     color: feedback.phase === 'error' ? 'var(--accent)' : 'var(--text)',
-                    whiteSpace: 'nowrap',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
                     overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
                   }}
                 >
                   {feedback.title}
                 </div>
                 {feedback.message && (
-                  <div style={{ marginTop: 3, fontSize: 11.5, color: 'var(--text-dim)' }}>
+                  <div
+                    style={{
+                      marginTop: 3,
+                      fontSize: 11.5,
+                      color: 'var(--text-dim)',
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
+                    }}
+                  >
                     {feedback.message}
                   </div>
                 )}

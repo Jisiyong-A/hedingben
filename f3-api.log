@@ -1,0 +1,7 @@
+[probe] codex: FAILED spawn EINVAL
+[probe] claude: FAILED spawn EINVAL
+windows OCR: available (en-GB, zh-Hans-CN, zh-Hant-TW)
+local-api listening on http://127.0.0.1:4318
+local data directory: C:\Users\12155\AppData\Local\Temp\opencode\f3-data
+[probe] hermes: contains=true bytes=320
+[kankan] AI 分类: BV1kS8H6 -> 影视音乐

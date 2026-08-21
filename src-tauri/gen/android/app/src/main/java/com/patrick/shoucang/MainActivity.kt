@@ -70,6 +70,7 @@ class MainActivity : TauriActivity() {
     rustWebView.settings.displayZoomControls = false
     rustWebView.addJavascriptInterface(ShareBridge(), "ShoucangShareBridge")
     rustWebView.addJavascriptInterface(OcrBridge(this), "OcrBridge")
+    rustWebView.addJavascriptInterface(ExtensionBridge(this), "ExtensionBridge")
     injectSystemInsets(rustWebView)
     android.util.Log.i("ShoucangShare", "onWebViewCreate: bridge registered, pending=${pendingShare != null}")
     pendingShare?.let { text ->

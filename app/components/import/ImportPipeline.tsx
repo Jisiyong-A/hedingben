@@ -31,8 +31,9 @@ export function ImportPipeline({ step }: { step: ImportStep | 'idle' | 'error' }
       aria-live="polite"
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 14,
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 8,
         padding: '14px 18px',
         borderRadius: 'var(--radius-6)',
         border: `1px solid ${errored ? 'var(--accent)' : 'var(--line-strong)'}`,

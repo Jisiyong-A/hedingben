@@ -448,7 +448,8 @@ async fn resolve_video<F: BiliFetcher + ?Sized>(
             &[
                 ("bvid", &resolved_bvid),
                 ("cid", &cid.to_string()),
-                ("fnval", "16"),
+                // fnval=1 请求 MP4 容器（durl 完整单文件）；fnval=16 返回 DASH m4s 分片不可直接播放
+                ("fnval", "1"),
                 ("fnver", "0"),
                 ("fourk", "0"),
             ],

@@ -62,7 +62,7 @@ export function TitleBar({
               color: 'var(--text)',
             }}
           >
-            收藏
+            合订本
           </div>
           {!compact && (
             <div
@@ -74,7 +74,7 @@ export function TitleBar({
                 textTransform: 'uppercase',
               }}
             >
-              Collection System
+              Bound Volume
             </div>
           )}
         </div>

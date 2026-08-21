@@ -37,6 +37,8 @@ android {
             }
         }
         getByName("release") {
+            // 个人分发：用 debug 密钥签 release，免 unsigned 装不上
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

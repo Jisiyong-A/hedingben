@@ -186,16 +186,22 @@ async fn download_image(
 
 async fn download_video(client: &reqwest::Client, url: &str, note_directory: &std::path::Path) -> Option<Value> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
+        eprintln!("[bili-video] reject: not http url");
         return None;
     }
     if !is_allowed_remote_video_url(url) {
+        eprintln!("[bili-video] reject: host not allowed: {url}");
         return None;
     }
     let response = match client.get(url).send().await {
         Ok(response) => response,
-        Err(_) => return None,
+        Err(err) => {
+            eprintln!("[bili-video] send failed: {err}");
+            return None;
+        }
     };
     if !response.status().is_success() {
+        eprintln!("[bili-video] http {}: {url}", response.status().as_u16());
         return None;
     }
     let declared_length = response
@@ -211,30 +217,37 @@ async fn download_video(client: &reqwest::Client, url: &str, note_directory: &st
     let file_path = note_directory.join("video.mp4");
     let mut file = match tokio::fs::File::create(&file_path).await {
         Ok(file) => file,
-        Err(_) => return None,
+        Err(err) => {
+            eprintln!("[bili-video] create file failed: {err}");
+            return None;
+        }
     };
     let mut stream = response.bytes_stream();
     let mut received: u64 = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = match chunk {
             Ok(chunk) => chunk,
-            Err(_) => {
+            Err(err) => {
+                eprintln!("[bili-video] stream error at {received} bytes: {err}");
                 let _ = tokio::fs::remove_file(&file_path).await;
                 return None;
             }
         };
         received += chunk.len() as u64;
         if received > MAX_VIDEO_BYTES {
+            eprintln!("[bili-video] exceeds {MAX_VIDEO_BYTES} bytes cap");
             drop(file);
             let _ = tokio::fs::remove_file(&file_path).await;
             return None;
         }
-        if let Err(_) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+        if let Err(err) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            eprintln!("[bili-video] write failed: {err}");
             let _ = tokio::fs::remove_file(&file_path).await;
             return None;
         }
     }
     drop(file);
+    eprintln!("[bili-video] downloaded {received} bytes ok");
 
     Some(json!({
         "fileName": "video.mp4",
@@ -356,6 +369,11 @@ pub async fn localize_note_media(
             .timeout(VIDEO_TIMEOUT_MS)
             .default_headers({
                 let mut h = HeaderMap::new();
+                // B站 CDN（upos/bilivideo）要求浏览器 UA + bilibili Referer，
+                // 缺 UA 会被 403 拒绝（与 Node 侧 downloadVideo 行为对齐）。
+                h.insert(USER_AGENT, HeaderValue::from_static(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+                ));
                 if let Ok(val) = HeaderValue::from_str(referer_for_source(source)) {
                     h.insert(REFERER, val);
                 }
