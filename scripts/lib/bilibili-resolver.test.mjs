@@ -166,7 +166,7 @@ test('video resolution maps fields and never stores signed dash urls', async () 
     [
       `https://api.bilibili.com/x/web-interface/view?bvid=${BV}`,
       `https://api.bilibili.com/x/tag/archive/tags?bvid=${BV}`,
-      `https://api.bilibili.com/x/player/playurl?bvid=${BV}&cid=${CID}&fnval=16&fnver=0&fourk=0`,
+      `https://api.bilibili.com/x/player/playurl?bvid=${BV}&cid=${CID}&fnval=1&fnver=0&fourk=0`,
     ],
   );
   for (const { init } of requests) {

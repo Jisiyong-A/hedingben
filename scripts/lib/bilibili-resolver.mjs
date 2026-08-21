@@ -238,7 +238,9 @@ async function resolveVideo(bvid, aid, sourceUrl, fetchImpl) {
   let playableVideoUrl = '';
   try {
     const playPayload = await fetchBiliJson(
-      `${API_BASE}/x/player/playurl?bvid=${encodeURIComponent(resolvedBvid)}&cid=${cid}&fnval=16&fnver=0&fourk=0`,
+      // fnval=1 请求 MP4 容器（durl 完整单文件，<video> 可直接播放）；
+      // fnval=16 会返回 DASH 分片（m4s 音画分离），本地落盘后无法直接播放。
+      `${API_BASE}/x/player/playurl?bvid=${encodeURIComponent(resolvedBvid)}&cid=${cid}&fnval=1&fnver=0&fourk=0`,
       fetchImpl,
     );
     const playData = assertBiliCode(playPayload);
