@@ -73,3 +73,7 @@ semantic-spike/
 # foreign experiment dir (semantic research spike)
 semantic-spike/
 public/models/
+
+# temp evidence logs
+f3-api.log
+*.log.tmp
