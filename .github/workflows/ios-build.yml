@@ -61,7 +61,7 @@ jobs:
       # 保持 .app 精简。
       - name: Build for iOS Simulator (tauri)
         run: |
-          npx tauri ios build --target aarch64-apple-ios-sim \
+          npx tauri ios build --target ios-aarch64-sim \
             --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Collect simulator .app
