@@ -53,6 +53,8 @@ jobs:
       - name: Patch Info.plist (URL scheme / ATS / launch screen)
         run: node scripts/ios-info-plist.cjs
 
+      # Release 配置：tauri 的 xcode-script 在 debug 下会读 dev-server 地址
+      # 文件（仅 tauri dev 期间存在）导致 panic；release 直接编译内嵌产物。
       - name: Build for iOS Simulator
         run: |
           cd src-tauri/gen/apple
@@ -62,7 +64,7 @@ jobs:
           xcodebuild \
             -project "$PROJ" \
             -scheme "$SCHEME" \
-            -configuration Debug \
+            -configuration Release \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath ../../target/ios-derived \
             CODE_SIGNING_ALLOWED=NO \
@@ -72,5 +74,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hedingben-ios-simulator-app
-          path: src-tauri/target/ios-derived/Build/Products/Debug-iphonesimulator/*.app
+          path: src-tauri/target/ios-derived/Build/Products/Release-iphonesimulator/*.app
           if-no-files-found: error

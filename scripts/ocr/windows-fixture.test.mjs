@@ -46,10 +46,11 @@ test('windows OCR: mixed-cn-en fixture keeps latin words', { skip: skipNoCjk }, 
   assert.ok(text.includes('咖啡') || text.includes('咖 啡'), `missing CJK in: ${text}`);
 });
 
-test('windows OCR: low-contrast fixture still yields text', { skip: process.platform !== 'win32' }, async () => {
+test('windows OCR: low-contrast fixture still yields text', { skip: skipNoCjk }, async () => {
   const results = await runWindowsOcr([low]);
   assert.equal(results.length, 1);
   // Recognition of low-contrast may be partial — require SOME text.
+  // 依赖中文语言包：CI 的 en-US-only 引擎对该 fixture 读不出任何字（本地 zh 环境正常）。
   assert.ok(results[0].text.length > 0 || results[0].error, `empty result: ${JSON.stringify(results[0])}`);
 });
 
