@@ -6,7 +6,9 @@ import os
 import posixpath
 import re
 
-REPO = r'D:\hermes\kankan-shoucang'
+# Resolve the repo root relative to this script — a hardcoded dev-machine
+# path breaks on CI checkouts (D:\a\hedingben\hedingben, etc.).
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.join(REPO, 'scripts')
 
 with open(os.path.join(REPO, 'src-tauri', 'tauri.conf.json'), encoding='utf-8') as f:
