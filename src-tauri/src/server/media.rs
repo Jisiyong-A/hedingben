@@ -392,7 +392,7 @@ pub async fn localize_note_media(
             result["ocrText"] = Value::String(ocr_text);
             result["ocrEngine"] = Value::String(engine.to_string());
             result["ocrProcessedAt"] =
-                Value::String(note_import::chrono_now_iso_public());
+                Value::String(crate::server::note_import::chrono_now_iso_public());
         }
     }
 

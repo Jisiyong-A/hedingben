@@ -341,7 +341,10 @@ async fn handle_health(State(state): State<ServerState>) -> Response {
         (Some("mlkit-text-v2"), vec!["zh-Hans", "zh-Hant", "en"])
     } else {
         #[cfg(target_os = "ios")]
-        let (engine, languages) = ocr_ios::engine_info();
+        let (engine, languages) = {
+            let (engine, languages) = ocr_ios::engine_info();
+            (Some(engine), languages)
+        };
         #[cfg(not(target_os = "ios"))]
         let (engine, languages) = (None, Vec::new());
         (engine, languages)
