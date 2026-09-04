@@ -53,26 +53,30 @@ jobs:
       - name: Patch Info.plist (URL scheme / ATS / launch screen)
         run: node scripts/ios-info-plist.cjs
 
-      # Release 配置：tauri 的 xcode-script 在 debug 下会读 dev-server 地址
-      # 文件（仅 tauri dev 期间存在）导致 panic；release 直接编译内嵌产物。
-      - name: Build for iOS Simulator
+      # 用 tauri ios build（不是裸 xcodebuild）：Rust 代码编译发生在 Xcode 的
+      # "Build Rust Code" phase 里，该 phase 需要连回外层 tauri CLI 守护进程
+      # 获取编译选项（server-addr 文件）——直接跑 xcodebuild 没有这个守护
+      # 进程会 panic。模拟器目标自动跳过代码签名。
+      # --config 覆盖 beforeBuildCommand：前端已在上面单独构建（无语义模型），
+      # 保持 .app 精简。
+      - name: Build for iOS Simulator (tauri)
         run: |
-          cd src-tauri/gen/apple
-          PROJ=$(ls -d *.xcodeproj | head -1)
-          SCHEME="$(basename "$PROJ" .xcodeproj)_iOS"
-          echo "project=$PROJ scheme=$SCHEME"
-          xcodebuild \
-            -project "$PROJ" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath ../../target/ios-derived \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+          npx tauri ios build --target aarch64-apple-ios-sim \
+            --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Collect simulator .app
+        run: |
+          mkdir -p dist-ios
+          APP_PATH=$(find src-tauri/gen src-tauri/target -type d -name "*.app" 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "no .app produced"; exit 1
+          fi
+          echo "found: $APP_PATH"
+          ditto -rsrc "$APP_PATH" "dist-ios/$(basename "$APP_PATH")"
 
       - name: Upload simulator .app artifact
         uses: actions/upload-artifact@v4
         with:
           name: hedingben-ios-simulator-app
-          path: src-tauri/target/ios-derived/Build/Products/Release-iphonesimulator/*.app
+          path: dist-ios/
           if-no-files-found: error
