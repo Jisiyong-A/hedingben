@@ -3,7 +3,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { runWindowsOcr } from './windows-local.mjs';
+import { runWindowsOcr, probeWindowsOcr } from './windows-local.mjs';
 import { runOcr } from './index.mjs';
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -13,8 +13,21 @@ const cn = path.join(fixtures, 'chinese-simple.png');
 const mixed = path.join(fixtures, 'mixed-cn-en.png');
 const low = path.join(fixtures, 'low-contrast.png');
 
+// WinRT 识别语言跟随系统已装语言包；CI 的 windows-latest 只有 en-US。
+// 没有 zh-* 语言包时跳过中文断言用例（本地装有中文包的环境照常跑）。
+let cjkSupported = false;
+if (process.platform === 'win32') {
+  try {
+    const probe = await probeWindowsOcr();
+    cjkSupported = (probe.languages || []).some((lang) => /^zh/i.test(lang));
+  } catch {
+    cjkSupported = false;
+  }
+}
+const skipNoCjk = process.platform !== 'win32' || !cjkSupported;
+
 // Real recognition tests — Windows only (WinRT engine). Skipped elsewhere.
-test('windows OCR: chinese-simple fixture yields searchable CJK text', { skip: process.platform !== 'win32' }, async () => {
+test('windows OCR: chinese-simple fixture yields searchable CJK text', { skip: skipNoCjk }, async () => {
   const results = await runWindowsOcr([cn]);
   assert.equal(results.length, 1);
   const text = results[0].text;
@@ -25,7 +38,7 @@ test('windows OCR: chinese-simple fixture yields searchable CJK text', { skip: p
   assert.ok(text.includes('水温') || text.includes('水 温'), `missing 水温 in: ${text}`);
 });
 
-test('windows OCR: mixed-cn-en fixture keeps latin words', { skip: process.platform !== 'win32' }, async () => {
+test('windows OCR: mixed-cn-en fixture keeps latin words', { skip: skipNoCjk }, async () => {
   const results = await runWindowsOcr([mixed]);
   const text = results[0].text;
   assert.ok(!results[0].error, `unexpected error: ${results[0].error}`);
