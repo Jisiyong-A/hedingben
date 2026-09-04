@@ -332,6 +332,20 @@ function isAllowedOrigin(origin) {
   }
 }
 
+// 与扩展内容脚本所在页面域对齐：心跳只放行小红书 / B 站自家域名
+// （扩展在 B 站页面也会心跳）。解析 hostname 而不是后缀匹配，
+// 防止 evil-xiaohongshu.com 这类伪造域混进来。
+function isAllowedPageOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    const hostname = url.hostname.toLowerCase();
+    return hostname === 'www.xiaohongshu.com' || hostname === 'm.xiaohongshu.com' || hostname.endsWith('.xiaohongshu.com')
+      || hostname === 'www.bilibili.com' || hostname === 'm.bilibili.com' || hostname.endsWith('.bilibili.com');
+  } catch {
+    return false;
+  }
+}
+
 function applyCorsHeaders(request, response) {
   const origin = request.headers.origin;
   if (origin && isAllowedOrigin(origin)) {
@@ -371,8 +385,17 @@ async function readNotesFile(filePath) {
     const raw = JSON.parse(await readFile(filePath, 'utf8'));
     return Array.isArray(raw) ? raw.filter(isUsableStoredNote) : [];
   } catch (error) {
-    // Corrupt archive must not crash the app, but must stay diagnosable.
+    // Corrupt archive must not crash the app, but must stay diagnosable —
+    // and must never be silently destroyed by the next write: keep a
+    // timestamped copy so the collection can be recovered manually.
     console.error(`[shoucang] notes.json 解析失败（${filePath}）:`, error instanceof Error ? error.message : String(error));
+    try {
+      const backupPath = `${filePath}.corrupt-${Date.now()}.json`;
+      copyFileSync(filePath, backupPath);
+      console.error(`[shoucang] 原文件已备份为 ${backupPath}`);
+    } catch {
+      // best-effort：备份失败不影响继续运行
+    }
     return [];
   }
 }
@@ -505,7 +528,9 @@ async function importNote(body = {}) {
 
   // Async AI re-classification: best-effort, never blocks the import,
   // falls back to the rule-based category already assigned above.
-  void (async () => {
+  // 走 mutation 队列：这里也是「读 → 改 → 写」，绕开队列会覆盖
+  // 并发导入/删除刚落盘的状态（丢更新）。
+  void queueMutation(async () => {
     try {
       const result = await classifyWithAI(note);
       if (!result.ok || !result.category) return;
@@ -518,7 +543,7 @@ async function importNote(body = {}) {
     } catch {
       // classification is optional; keep the rule-based category
     }
-  })();
+  });
 
   return {
     notes: merged.notes,
@@ -601,7 +626,11 @@ async function sendMediaFile(request, response, pathname) {
     if (rangeHeader) {
       const matchRange = rangeHeader.match(/bytes=(\d*)-(\d*)/);
       const start = matchRange?.[1] ? Number.parseInt(matchRange[1], 10) : 0;
-      const end = matchRange?.[2] ? Number.parseInt(matchRange[2], 10) : stat.size - 1;
+      // 客户端可能发 end 超出文件末尾的 range：按 RFC 7233 收敛到 size-1，
+      // 否则 Content-Length 大于实际 body，部分客户端会一直等剩余字节。
+      const end = matchRange?.[2]
+        ? Math.min(Number.parseInt(matchRange[2], 10), stat.size - 1)
+        : stat.size - 1;
       if (start >= stat.size || start > end) {
         response.writeHead(416, { 'Content-Range': `bytes */${stat.size}` });
         response.end();
@@ -614,7 +643,10 @@ async function sendMediaFile(request, response, pathname) {
         'Accept-Ranges': 'bytes',
         'Cache-Control': 'private, max-age=31536000, immutable',
       });
-      createReadStream(filePath, { start, end }).pipe(response);
+      const rangeStream = createReadStream(filePath, { start, end });
+      // 并发 DELETE 删掉文件等读错误：必须销毁响应，不能把 socket 挂着
+      rangeStream.on('error', () => response.destroy());
+      rangeStream.pipe(response);
       return true;
     }
 
@@ -624,7 +656,9 @@ async function sendMediaFile(request, response, pathname) {
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'private, max-age=31536000, immutable',
     });
-    createReadStream(filePath).pipe(response);
+    const fullStream = createReadStream(filePath);
+    fullStream.on('error', () => response.destroy());
+    fullStream.pipe(response);
   } catch {
     sendJson(request, response, 404, { ok: false, error: 'Media not found' });
   }
@@ -639,20 +673,27 @@ const server = createServer(async (request, response) => {
 
   const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
 
+  const hostHeader = String(request.headers.host || '').toLowerCase();
+  const bareHost = hostHeader.split(':')[0] || '';
+  // DNS rebinding 防护：浏览器同源 GET 不带 Origin，Host 头是唯一可靠边界。
+  // 攻击页把 DNS 指向 127.0.0.1 时 Host 仍是攻击者域名，直接拒绝。
+  // 端口不参与比较（adb forward 等转发调试的宿主端口会不同）。
+  if (!['127.0.0.1', 'localhost', 'tauri.localhost'].includes(bareHost)) {
+    sendJson(request, response, 403, { ok: false, error: 'Host not allowed' });
+    return;
+  }
+
   // The extension content script heartbeats from the page context, so its
-  // Origin is the XHS site — allow that single benign endpoint through
-  // while keeping every other route on the strict allowlist.
+  // Origin is the XHS/Bilibili site — allow that single benign endpoint
+  // through while keeping every other route on the strict allowlist.
   const isHeartbeat = request.method === 'POST' && url.pathname === '/setup/extension/heartbeat';
   if (!isHeartbeat && !isAllowedOrigin(request.headers.origin)) {
     sendJson(request, response, 403, { ok: false, error: 'Origin not allowed' });
     return;
   }
-  if (isHeartbeat && request.headers.origin && !isAllowedOrigin(request.headers.origin)) {
-    const host = String(request.headers.origin || '');
-    if (!/xiaohongshu\.com$/i.test(host)) {
-      sendJson(request, response, 403, { ok: false, error: 'Origin not allowed' });
-      return;
-    }
+  if (isHeartbeat && request.headers.origin && !isAllowedPageOrigin(request.headers.origin)) {
+    sendJson(request, response, 403, { ok: false, error: 'Origin not allowed' });
+    return;
   }
 
   if (request.method === 'OPTIONS') {

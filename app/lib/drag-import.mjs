@@ -42,8 +42,8 @@ export function parseDraggedCardInput(value) {
     const sourceUrl = new URL(payload?.sourceUrl || '');
     const id = markerIndex >= 0
       ? payload?.id
-      : sourceUrl.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1];
-    if (!/^[0-9a-f]{24}$/i.test(id || '')) return null;
+      : sourceUrl.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{20,26})(?:\/|$)/i)?.[1];
+    if (!/^[0-9a-f]{20,26}$/i.test(id || '')) return null;
     const host = sourceUrl.hostname.toLowerCase();
     if (!['www.xiaohongshu.com', 'm.xiaohongshu.com', 'bilibili.com', 'www.bilibili.com'].includes(host)) return null;
     return {

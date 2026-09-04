@@ -189,17 +189,34 @@ test('import chain: b23 WAF error falls back to noteFromSharedText', async () =>
   const isBiliShare = /bilibili\.com$/i.test(urlHost) || /b23\.tv$/i.test(urlHost);
   assert.equal(isBiliShare, true, 'Should detect b23.tv from shared text');
 
-  let resolved = null;
+  let fallbackError = null;
   try {
-    resolved = await resolveBilibiliNote(sourceUrl, {
+    await resolveBilibiliNote(sourceUrl, {
       fetchImpl: async () => htmlWafResponse(403),
     });
-  } catch (error) {
-    assert.match(error.message, /风控|无法|请求失败/);
-    resolved = noteFromSharedText(sharedText);
+  } catch (resolveError) {
+    assert.match(resolveError.message, /风控|无法|请求失败/);
+    // b23.tv 短链解析失败且无法从 URL 提取 B 站内容 ID 时，
+    // 兜底必须拒绝导入 —— 创建 id 为完整 URL 的笔记会删不掉、去重失效。
+    try {
+      noteFromSharedText(sharedText);
+    } catch (error) {
+      fallbackError = error;
+    }
   }
 
-  assert.ok(resolved, 'Should have fallback result');
+  assert.ok(fallbackError, 'b23 short link without extractable id must be rejected');
+  assert.match(fallbackError.message, /B 站内容 ID/);
+});
+
+// ─── noteFromSharedText: BV URL fallback keeps a deletable id ────────────────
+
+test('import chain: noteFromSharedText extracts BV id from full URL', () => {
+  const sharedText =
+    '这个视频讲的特别好 https://www.bilibili.com/video/BV1xx411c7mD 推荐大家看看，讲的很有道理\n真的值得收藏';
+  const resolved = noteFromSharedText(sharedText);
+  assert.equal(resolved.id, 'BV1xx411c7mD');
+  assert.equal(resolved.source, 'bilibili');
 });
 
 // ─── Idempotent dedup via mergeImportedNote ──────────────────────────────────

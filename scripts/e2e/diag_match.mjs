@@ -12,7 +12,7 @@ function extractInitialState(html) {
 }
 
 const url = process.argv[2];
-const noteId = url.match(/\/explore\/([0-9a-f]{24})/i)?.[1];
+const noteId = url.match(/\/explore\/([0-9a-f]{20,26})/i)?.[1];
 console.log('target noteId:', noteId);
 
 const res = await fetch(url, {

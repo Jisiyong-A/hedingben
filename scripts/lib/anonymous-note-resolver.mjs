@@ -114,8 +114,51 @@ function findNote(root, noteId) {
   return null;
 }
 
-function extractInitialState(html) {
-  const marker = 'window.__INITIAL_STATE__=';
+// 把序列化 JSON 里的裸 undefined 字面量替换成 null。
+// 必须跳过字符串字面量内部 —— 正文里出现 "undefined" 一词的笔记
+// （技术类笔记很常见）不能被改成 "null"。
+function replaceUndefinedLiterals(serialized) {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  let tokenStart = -1;
+  for (let i = 0; i < serialized.length; i += 1) {
+    const char = serialized[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      result += char;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+    if (/[a-zA-Z_]/.test(char)) {
+      if (tokenStart === -1) tokenStart = i;
+      continue;
+    }
+    if (tokenStart !== -1) {
+      const word = serialized.slice(tokenStart, i);
+      result += word === 'undefined' ? 'null' : word;
+      tokenStart = -1;
+    }
+    result += char;
+  }
+  if (tokenStart !== -1) {
+    const word = serialized.slice(tokenStart);
+    result += word === 'undefined' ? 'null' : word;
+  }
+  return result;
+}
+
+function extractInitialState(html) {  const marker = 'window.__INITIAL_STATE__=';
   const start = html.indexOf(marker);
   if (start === -1) return null;
   const valueStart = start + marker.length;
@@ -127,7 +170,7 @@ function extractInitialState(html) {
     return JSON.parse(serialized);
   } catch {
     try {
-      return JSON.parse(serialized.replace(/\bundefined\b/g, 'null'));
+      return JSON.parse(replaceUndefinedLiterals(serialized));
     } catch {
       return null;
     }
@@ -309,8 +352,8 @@ export async function resolveAnonymousNote(sourceUrl, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const pageUrl = await expandShortUrl(sourceUrl, fetchImpl);
   const noteId = options.expectedNoteId || pageUrl.pathname
-    .match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1];
-  if (!noteId || !/^[0-9a-f]{24}$/i.test(noteId)) {
+    .match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{20,26})(?:\/|$)/i)?.[1];
+  if (!noteId || !/^[0-9a-f]{20,26}$/i.test(noteId)) {
     throw new Error('匿名解析器没有识别到笔记 ID');
   }
 

@@ -38,7 +38,7 @@ function noteCardFromDragTarget(target) {
 
     let id = '';
     if (isXhs) {
-      id = sourceUrl.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1] || '';
+      id = sourceUrl.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{20,26})(?:\/|$)/i)?.[1] || '';
     } else {
       id = sourceUrl.pathname.match(/^\/video\/(BV[a-zA-Z0-9]{10}|av\d+)(?:\/|$)/i)?.[1] || '';
     }

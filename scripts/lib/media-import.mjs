@@ -103,48 +103,67 @@ function isAllowedRemoteVideoUrl(url) {
  *  never block the import — the note stays saved with images only. */
 async function downloadVideo(url, noteDirectory, fetchImpl, source) {
   if (!/^https?:\/\//.test(url || '')) return null;
-  if (source === 'bilibili' && !isAllowedRemoteVideoUrl(url)) {
-    // B站 DASH 链路产生的可播放 mp4/m4s 必须在白名单内，拒绝未知域
-    return null;
-  }
+  // 无条件白名单（与 Rust 侧 download_video 对齐）：B站 DASH 产生的可播放
+  // mp4/m4s 必须在白名单内。XHS 源同样不允许任意 URL —— 否则 payload 里的
+  // videoUrl 就是任意的服务端 fetch+落盘（SSRF 读穿）。
+  if (!isAllowedRemoteVideoUrl(url)) return null;
   const referer = REFERER_BY_SOURCE[source] || REFERER_BY_SOURCE.xhs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), VIDEO_TIMEOUT_MS);
+  const filePath = path.join(noteDirectory, 'video.mp4');
+  const fileStream = createWriteStream(filePath);
   try {
-    const response = await (fetchImpl || fetch)(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
-        Referer: referer,
-      },
-    });
-    if (!response.ok || !response.body) return null;
-    const declaredLength = Number.parseInt(response.headers.get('content-length') || '0', 10);
-    if (declaredLength > MAX_VIDEO_BYTES) return null;
-
-    const filePath = path.join(noteDirectory, 'video.mp4');
-    const fileStream = createWriteStream(filePath);
-    let received = 0;
-    const reader = response.body.getReader();
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      received += value.byteLength;
-      if (received > MAX_VIDEO_BYTES) {
-        await fileStream.destroy();
-        await rm(filePath, { force: true }).catch(() => {});
-        return null;
+    let currentUrl = url;
+    for (let redirectCount = 0; ; redirectCount += 1) {
+      // 每一跳都复核：白名单域的 302 可以指向任意域
+      if (!isAllowedRemoteVideoUrl(currentUrl)) return null;
+      const response = await (fetchImpl || fetch)(currentUrl, {
+        signal: controller.signal,
+        redirect: 'manual',
+        credentials: 'omit',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+          Referer: referer,
+        },
+      });
+      if (response.status >= 300 && response.status < 400) {
+        if (redirectCount >= MAX_REDIRECTS) return null;
+        const location = response.headers.get('location');
+        if (!location) return null;
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
       }
-      fileStream.write(Buffer.from(value));
+      if (!response.ok || !response.body) return null;
+      const declaredLength = Number.parseInt(response.headers.get('content-length') || '0', 10);
+      if (declaredLength > MAX_VIDEO_BYTES) return null;
+
+      let received = 0;
+      const reader = response.body.getReader();
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > MAX_VIDEO_BYTES) {
+          throw new Error('video exceeds size cap');
+        }
+        const chunk = Buffer.from(value);
+        // 尊重背压：慢盘上不限制会让 300MB 全部堆进内存
+        if (!fileStream.write(chunk)) {
+          await new Promise((resolve) => fileStream.once('drain', resolve));
+        }
+      }
+      await new Promise((resolve, reject) => {
+        fileStream.end(resolve);
+        fileStream.on('error', reject);
+      });
+      return { fileName: 'video.mp4', filePath, sourceUrl: url };
     }
-    await new Promise((resolve, reject) => {
-      fileStream.end(resolve);
-      fileStream.on('error', reject);
-    });
-    return { fileName: 'video.mp4', filePath, sourceUrl: url };
   } catch {
+    // 失败不能留下截断的 video.mp4 —— /media/:id/video.mp4 会把它
+    // 当完整文件伺服出去
+    fileStream.destroy();
+    await rm(filePath, { force: true }).catch(() => {});
     return null;
   } finally {
     clearTimeout(timer);

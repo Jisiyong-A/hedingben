@@ -3,7 +3,7 @@
   const REQUEST_EVENT = 'shoucang-note-capture-request';
 
   function noteIdFromLocation() {
-    const xhs = location.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{24})(?:\/|$)/i)?.[1];
+    const xhs = location.pathname.match(/^\/(?:explore|search_result|discovery\/item)\/([0-9a-f]{20,26})(?:\/|$)/i)?.[1];
     if (xhs) return xhs;
     const bv = location.pathname.match(/^\/video\/(BV[a-zA-Z0-9]{10})(?:\/|$)/)?.[1];
     if (bv) return bv;

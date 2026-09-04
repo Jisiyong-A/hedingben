@@ -21,7 +21,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::{
     path::{Path as FsPath, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 use tokio::io::{AsyncSeekExt, SeekFrom};
 
@@ -34,7 +34,10 @@ pub struct ServerState {
     pub data_directory: PathBuf,
     pub media_directory: PathBuf,
     pub public_base_url: String,
-    pub mutation_queue: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// 串行化 notes.json 的 read-modify-write（import/ocr 回写/删除互相并发时
+    /// 谁后写谁覆盖对方，丢更新）。只在「读 → 改 → 写」临界区持有，
+    /// 不覆盖网络下载等慢操作。
+    pub write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ServerState {
@@ -45,7 +48,7 @@ impl ServerState {
             data_directory,
             media_directory,
             public_base_url,
-            mutation_queue: Arc::new(Mutex::new(None)),
+            write_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
@@ -104,15 +107,49 @@ fn is_allowed_origin(origin: Option<&str>) -> bool {
     }
 }
 
+/// 心跳端点的页面来源白名单：扩展内容脚本在页面上下文里发心跳，
+/// B 站页面也会发。按 hostname 精确匹配，不用后缀 —— 防止
+/// evil-xiaohongshu.com 这类伪造域混进来。
+fn is_allowed_page_origin(origin: &str) -> bool {
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    if url.scheme() != "https" && url.scheme() != "http" {
+        return false;
+    }
+    let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+    host == "www.xiaohongshu.com"
+        || host == "m.xiaohongshu.com"
+        || host.ends_with(".xiaohongshu.com")
+        || host == "www.bilibili.com"
+        || host == "m.bilibili.com"
+        || host.ends_with(".bilibili.com")
+}
+
+/// DNS rebinding 防护：浏览器对同源 GET 不带 Origin，Host 头是唯一
+/// 可靠边界。攻击页把 DNS 指到 127.0.0.1 时 Host 仍是攻击者域名。
+/// 端口不参与比较（adb forward 等转发调试的宿主端口会不同）。
+fn is_allowed_host(host: Option<&str>) -> bool {
+    let Some(host) = host else {
+        return false;
+    };
+    let bare = host.split(':').next().unwrap_or("").to_ascii_lowercase();
+    matches!(bare.as_str(), "127.0.0.1" | "localhost" | "tauri.localhost")
+}
+
 fn is_heartbeat_request(req: &Request<Body>) -> bool {
     req.method() == Method::POST && req.uri().path() == "/setup/extension/heartbeat"
 }
 
 async fn cors_middleware(
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
+    if !is_allowed_host(req.headers().get(header::HOST).and_then(|value| value.to_str().ok())) {
+        return error_json(StatusCode::FORBIDDEN, "Host not allowed");
+    }
+
     let origin = req
         .headers()
         .get(header::ORIGIN)
@@ -121,8 +158,9 @@ async fn cors_middleware(
 
     let allowed = match origin.as_deref() {
         Some(origin) if !is_allowed_origin(Some(origin)) => {
-            // 心跳端点放行 xiaohongshu.com origin（扩展放行；Android 无扩展，保留兼容）
-            if is_heartbeat_request(&req) && origin.ends_with("xiaohongshu.com") {
+            // 心跳端点放行 xiaohongshu.com / bilibili.com 页面来源（扩展放行；
+            // Android 无扩展，保留兼容）
+            if is_heartbeat_request(&req) && is_allowed_page_origin(origin) {
                 true
             } else {
                 return error_json(StatusCode::FORBIDDEN, "Origin not allowed");
@@ -195,7 +233,22 @@ async fn read_notes_file(file_path: &FsPath) -> Vec<Value> {
                 !id.is_empty() && (!title.is_empty() || !raw_content.is_empty() || !cover_url.is_empty())
             })
             .collect(),
-        _ => Vec::new(),
+        _ => {
+            // 解析失败不能静默丢库：下一次写入会把坏文件整个覆盖掉。
+            // 先留一份带时间戳的备份，用户手动恢复还有救。
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let backup = file_path.with_extension(format!("json.corrupt-{stamp}"));
+            if tokio::fs::copy(file_path, &backup).await.is_ok() {
+                eprintln!(
+                    "[shoucang] notes.json 解析失败，原文件已备份为 {}",
+                    backup.display()
+                );
+            }
+            Vec::new()
+        }
     }
 }
 
@@ -382,9 +435,13 @@ async fn run_import(state: &ServerState, body: Value) -> Result<Value, String> {
     note["category"] = Value::String(category::infer_category_from_note(&note));
     note["savedAt"] = Value::String(note_import::chrono_now_iso_public());
 
-    let existing = read_notes(state).await;
-    let (created, merged) = note_import::merge_imported_note(&Value::Array(existing), &note);
-    write_notes(state, &merged).await?;
+    let (created, merged) = {
+        let _guard = state.write_lock.lock().await;
+        let existing = read_notes(state).await;
+        let (created, merged) = note_import::merge_imported_note(&Value::Array(existing), &note);
+        write_notes(state, &merged).await?;
+        (created, merged)
+    };
 
     Ok(json!({
         "notes": merged,
@@ -476,6 +533,7 @@ async fn handle_ocr_update(
         return error_json(StatusCode::BAD_REQUEST, "imageOcr 必须是数组");
     }
 
+    let _guard = state.write_lock.lock().await;
     let mut notes = read_notes(&state).await;
     let target = notes.iter_mut().find(|note| note["id"].as_str() == Some(note_id.as_str()));
     let Some(target) = target else {
@@ -500,6 +558,7 @@ async fn handle_delete(State(state): State<ServerState>, Path(note_id): Path<Str
         return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
     }
 
+    let _guard = state.write_lock.lock().await;
     let existing = read_notes(&state).await;
     let (deleted, rest) = note_import::remove_stored_note(&Value::Array(existing), &note_id);
     if deleted.is_none() {
@@ -553,6 +612,7 @@ async fn handle_video_delete(State(state): State<ServerState>, Path(note_id): Pa
         return error_json(StatusCode::BAD_REQUEST, "无效的笔记 ID");
     }
 
+    let _guard = state.write_lock.lock().await;
     let mut notes = read_notes(&state).await;
     let target = notes.iter_mut().find(|note| note["id"].as_str() == Some(note_id.as_str()));
     let Some(target) = target else {
@@ -692,7 +752,10 @@ fn parse_range(range_header: &str, size: u64) -> Option<(u64, u64)> {
     let end: u64 = if end_raw.is_empty() {
         size.saturating_sub(1)
     } else {
-        end_raw.trim().parse().ok()?
+        // 客户端可能发 end 超出文件末尾的 range（bytes=0-999999）：
+        // 按 RFC 7233 收敛到 size-1，否则 Content-Length 会大于实际 body，
+        // 部分客户端会一直等剩余字节导致播放卡住。
+        end_raw.trim().parse::<u64>().ok()?.min(size.saturating_sub(1))
     };
     Some((start, end))
 }

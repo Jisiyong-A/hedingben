@@ -225,15 +225,30 @@ export function noteFromSharedText(input) {
   if (/bilibili\.com$/i.test(urlHost) || /b23\.tv$/i.test(urlHost)) {
     const title = lines[0] || '未命名笔记';
     const content = lines.slice(1).join('\n') || lines[0];
-    // Try to extract opusId from URL path (e.g. /opus/12345)
+    // 从 URL 提取可删除的合法 id（DELETE 路由只认 hex/BV/av/纯数字）。
+    // 提不出（如 b23.tv 短链无法展开）就拒绝导入 —— 否则会创建
+    // id 为完整 URL 的笔记：删不掉、media 目录名是 URL、去重也失效。
+    let noteId = '';
     let opusId;
     try {
       const urlObj = new URL(sourceUrl);
       const opusMatch = urlObj.pathname.match(/^\/opus\/(\d+)/);
-      if (opusMatch) opusId = opusMatch[1];
+      const bvMatch = urlObj.pathname.match(/\/video\/(BV[a-zA-Z0-9]{10})(?:\/|$)/);
+      const avMatch = urlObj.pathname.match(/\/video\/av(\d+)(?:\/|$)/);
+      if (opusMatch) {
+        opusId = opusMatch[1];
+        noteId = opusId;
+      } else if (bvMatch) {
+        noteId = bvMatch[1];
+      } else if (avMatch) {
+        noteId = `av${avMatch[1]}`;
+      }
     } catch { /* ignore */ }
+    if (!noteId) {
+      throw new Error('无法从链接识别 B 站内容 ID，请打开原页后重试或直接拖动卡片');
+    }
     return {
-      id: sourceUrl,
+      id: noteId,
       source: 'bilibili',
       sourceUrl,
       title,

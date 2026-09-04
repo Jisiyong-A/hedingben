@@ -2,8 +2,8 @@
  * AI classification for imported notes.
  *
  * Privacy & failure model:
- * - The API key is read from the local environment only (env var first,
- *   then the Hermes .env file) and is never stored by the app.
+ * - The API key is opt-in: read from the process env, or from the .env
+ *   file pointed at by LOCAL_AI_ENV_FILE. No key → no network call at all.
  * - Classification is async and best-effort: any failure falls back to
  *   the rule-based classifier already in place — importing never blocks
  *   on the AI.
@@ -23,7 +23,6 @@ export const CATEGORY_OPTIONS = [
 
 const DEFAULT_ENV_FILES = [
   process.env.LOCAL_AI_ENV_FILE || '',
-  'D:/hermes/.env',
 ].filter(Boolean);
 
 export async function loadAiApiKey(env = process.env) {
