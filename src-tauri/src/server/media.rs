@@ -353,8 +353,54 @@ pub async fn localize_note_media(
     let mut result = note.clone();
     result["sourceImageUrls"] = Value::Array(source_urls.iter().map(|u| Value::String(u.clone())).collect());
     result["imageUrls"] = Value::Array(local_image_urls.iter().map(|u| Value::String(u.clone())).collect());
-    result["imageOcr"] = Value::Array(Vec::new());
-    result["ocrText"] = Value::String(String::new());
+
+    // iOS：导入时直接跑 Apple Vision OCR（与桌面 Node 门面同构，前端零改动）。
+    // Android 由 Kotlin OcrBridge + 前端编排回写；桌面 shell 由 Node 跑 OCR。
+    #[cfg(target_os = "ios")]
+    {
+        let ocr_paths: Vec<(String, std::path::PathBuf)> = successful
+            .iter()
+            .filter_map(|item| {
+                let file_name = item["fileName"].as_str()?.to_string();
+                let file_path = item["filePath"].as_str()?.to_string();
+                Some((file_name, std::path::PathBuf::from(file_path)))
+            })
+            .collect();
+        if ocr_paths.is_empty() {
+            result["imageOcr"] = Value::Array(Vec::new());
+            result["ocrText"] = Value::String(String::new());
+        } else {
+            let items = crate::server::ocr_ios::run_ocr_async(ocr_paths).await;
+            let image_ocr: Vec<Value> = items
+                .iter()
+                .map(|item| {
+                    json!({
+                        "imageUrl": format!("{public_base_url}/media/{note_id}/{}", item.file_name),
+                        "text": item.text,
+                        "error": item.error,
+                    })
+                })
+                .collect();
+            let ocr_text = items
+                .iter()
+                .map(|item| item.text.as_str())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<&str>>()
+                .join("\n\n");
+            let engine = crate::server::ocr_ios::engine_info().0;
+            result["imageOcr"] = Value::Array(image_ocr);
+            result["ocrText"] = Value::String(ocr_text);
+            result["ocrEngine"] = Value::String(engine.to_string());
+            result["ocrProcessedAt"] =
+                Value::String(note_import::chrono_now_iso_public());
+        }
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        result["imageOcr"] = Value::Array(Vec::new());
+        result["ocrText"] = Value::String(String::new());
+    }
     result["coverUrl"] = local_image_urls
         .first()
         .map(|u| Value::String(u.clone()))

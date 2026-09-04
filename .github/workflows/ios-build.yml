@@ -1,0 +1,76 @@
+name: iOS build (simulator)
+
+# 合订本 iOS 移植验证：macOS runner 上生成 Tauri iOS 工程 →
+# 以 iOS 模拟器为目标编译（Rust aarch64-apple-ios-sim + Swift 壳 + 前端嵌入）。
+# 模拟器构建不需要开发者证书；真机/上架需自行签名。
+# 语义模型（265MB）不进 iOS 包 —— semantic search 暂用关键词回退。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "app/**"
+      - "scripts/**"
+      - "package.json"
+      - ".github/workflows/ios-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust iOS targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # 只产出前端静态导出（跳过 265MB 语义模型同步，控制 iOS 包体积）
+      - name: Build frontend (static export)
+        run: npx next build --webpack
+
+      - name: Ensure xcodegen available
+        run: |
+          if ! command -v xcodegen &> /dev/null; then
+            brew install xcodegen
+          fi
+
+      # 中文 productName 在 xcodebuild -scheme 传参里有编码风险，CI 内临时换 ASCII
+      - name: Normalize productName for Xcode
+        run: node scripts/ios-product-name.cjs
+
+      - name: Generate iOS project
+        run: npx tauri ios init
+
+      - name: Patch Info.plist (URL scheme / ATS / launch screen)
+        run: node scripts/ios-info-plist.cjs
+
+      - name: Build for iOS Simulator
+        run: |
+          cd src-tauri/gen/apple
+          PROJ=$(ls -d *.xcodeproj | head -1)
+          SCHEME="$(basename "$PROJ" .xcodeproj)_iOS"
+          echo "project=$PROJ scheme=$SCHEME"
+          xcodebuild \
+            -project "$PROJ" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath ../../target/ios-derived \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload simulator .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hedingben-ios-simulator-app
+          path: src-tauri/target/ios-derived/Build/Products/Debug-iphonesimulator/*.app
+          if-no-files-found: error

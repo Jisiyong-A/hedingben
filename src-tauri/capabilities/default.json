@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "合订本默认能力：核心权限 + 深链（hedingben:// 系统分享接收）。deep-link 插件仅在移动端注册，桌面构建忽略此能力。",
+  "platforms": ["iOS", "android"],
+  "windows": ["main"],
+  "permissions": ["core:default", "deep-link:default"]
+}

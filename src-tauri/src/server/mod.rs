@@ -7,6 +7,8 @@ mod category;
 mod media;
 mod note_import;
 mod resolver;
+#[cfg(target_os = "ios")]
+mod ocr_ios;
 
 use axum::{
     body::{Body, Bytes},
@@ -329,18 +331,25 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
 // ---------- 处理器 ----------
 
 async fn handle_health(State(state): State<ServerState>) -> Response {
-    // Android 端 OCR 由 Kotlin ML Kit bridge 提供（OcrBridge），内置可用
-    let local_ocr = cfg!(target_os = "android");
-    let engine = if local_ocr { Some("mlkit-text-v2") } else { None };
-    let languages: Vec<&str> = if local_ocr {
-        vec!["zh-Hans", "zh-Hant", "en"]
+    // Android 端 OCR 由 Kotlin ML Kit bridge 提供；iOS 在导入时直接跑
+    // Apple Vision（ocr_ios，与桌面 Node 侧门面同构）；桌面 shell 走 Node。
+    let platform = std::env::consts::OS;
+    let is_android = cfg!(target_os = "android");
+    let is_ios = cfg!(target_os = "ios");
+    let local_ocr = is_android || is_ios;
+    let (engine, languages): (Option<&str>, Vec<&str>) = if is_android {
+        (Some("mlkit-text-v2"), vec!["zh-Hans", "zh-Hant", "en"])
     } else {
-        Vec::new()
+        #[cfg(target_os = "ios")]
+        let (engine, languages) = ocr_ios::engine_info();
+        #[cfg(not(target_os = "ios"))]
+        let (engine, languages) = (None, Vec::new());
+        (engine, languages)
     };
     ok_json(json!({
         "ok": true,
         "port": DEFAULT_PORT,
-        "platform": "android",
+        "platform": platform,
         "dataDirectory": state.data_directory.to_string_lossy(),
         "localOcr": local_ocr,
         "ocr": {
@@ -851,8 +860,9 @@ mod integration_tests {
             .unwrap();
         assert_eq!(health["ok"], true);
         assert_eq!(health["port"], 4318);
-        assert_eq!(health["platform"], "android");
-        assert_eq!(health["localOcr"], false);
+        // 平台随编译目标走（测试跑在宿主机上）
+        assert_eq!(health["platform"], std::env::consts::OS);
+        assert_eq!(health["localOcr"], cfg!(any(target_os = "android", target_os = "ios")));
 
         let notes: Value = client.get("http://127.0.0.1:24318/notes").send().await.unwrap().json().await.unwrap();
         assert_eq!(notes["notes"].as_array().unwrap().len(), 0);

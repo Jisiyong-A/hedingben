@@ -248,7 +248,7 @@ fn start_watchdog(app: tauri::AppHandle, child_arc: Arc<Mutex<Option<Child>>>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(desktop)]
     {
         let app = tauri::Builder::default()
             .setup(|app| {
@@ -300,16 +300,19 @@ pub fn run() {
         });
     }
 
-    #[cfg(target_os = "android")]
+    // Android / iOS：无 node，同进程内嵌 Rust sidecar（契约与桌面一致）。
+    // iOS 上由 Info.plist 注册 hedingben:// URL scheme 接收分享（深链）。
+    #[cfg(mobile)]
     {
         tauri::Builder::default()
+            .plugin(tauri_plugin_deep_link::init())
             .setup(|app| {
                 let data_dir = app.path().app_local_data_dir().map_err(|err| err.to_string())?;
                 let data_dir = normalize_win_path(&data_dir);
                 fs::create_dir_all(&data_dir).map_err(|err| err.to_string())?;
                 std::thread::spawn(move || {
                     if let Err(err) = server::start_server_blocking(data_dir, 4318) {
-                        eprintln!("[android] local-api server failed: {err}");
+                        eprintln!("[mobile] local-api server failed: {err}");
                     }
                 });
                 Ok(())

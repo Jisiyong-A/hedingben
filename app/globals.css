@@ -3,6 +3,14 @@
 
 /* ── SHOUCANG DOT/GRID base styles ──────────────────────────────────── */
 
+/* 系统栏/安全区 inset 默认值：
+   - iOS（WKWebView + viewport-fit=cover）：env() 给出真实安全区
+   - Android：WebView 不支持 env()，回退 0，由 Kotlin __setInsets 注入覆盖 */
+:root {
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 * { box-sizing: border-box; }
 
 html {

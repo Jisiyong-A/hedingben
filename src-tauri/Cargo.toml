@@ -1,8 +1,8 @@
 [package]
 name = "shoucang"
 version = "0.1.0"
-description = "Local desktop shell for 收藏"
-authors = ["Patrick"]
+description = "合订本 — Tauri 壳：桌面 spawn Node sidecar，移动端进程内 Rust sidecar"
+authors = ["Jisiyong-A"]
 edition = "2021"
 
 [lib]
@@ -19,7 +19,7 @@ opt-level = 2
 [dependencies]
 tauri = { version = "2", features = [] }
 
-# Android 内嵌 sidecar（桌面端同样编译，仅 android 分支启用）
+# 内嵌 sidecar（移动端进程内运行；桌面由 scripts/local-api.mjs 承担）
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "signal"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
@@ -29,3 +29,20 @@ serde_json = "1"
 url = "2"
 futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
+
+# 移动端：hedingben:// 深链接收藏（系统分享/快捷指令 → App）
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-deep-link = "2"
+
+# iOS：Apple Vision 本地 OCR（VNRecognizeTextRequest，全离线）
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { version = "0.6", default-features = false, features = ["std", "alloc"] }
+objc2-foundation = { version = "0.3", features = [
+    "NSArray", "NSString", "NSDictionary", "NSEnumerator", "NSError", "NSObject",
+] }
+objc2-vision = { version = "0.3", features = [
+    "alloc", "std", "VNTypes", "VNObservation", "VNRequest", "VNRequestHandler",
+    "VNRecognizeTextRequest", "objc2-core-graphics",
+] }
+objc2-core-graphics = { version = "0.3", features = ["CGImage"] }
+core-foundation = "0.10"
