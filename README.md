@@ -9,6 +9,7 @@
 <img src="https://img.shields.io/badge/Windows-10%2B-0078D6?logo=windows&logoColor=white" alt="Windows" />
 <img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS" />
 <img src="https://img.shields.io/badge/Android-8%2B-3DDC84?logo=android&logoColor=white" alt="Android" />
+<img src="https://img.shields.io/badge/iOS-13%2B-000000?logo=ios&logoColor=white" alt="iOS" />
 <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri" />
 <img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white" alt="Next.js" />
 <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License" />
@@ -49,8 +50,8 @@
 | | 功能 | 说明 |
 |:--:|---|---|
 | 🖱️ | **拖拽导入** | 桌面端：从小红书/搜索页把笔记卡片拖进 App 画布 |
-| 📲 | **系统分享导入** | Android：小红书 App / 浏览器里「分享 → 合订本」，正文与链接自动入库 |
-| 🔍 | **图片文字可搜** | 本地 OCR（macOS Vision / Windows WinRT / Android ML Kit），中英文都认，图里的干货变成可搜索文本 |
+| 📲 | **系统分享导入** | Android：小红书 App / 浏览器里「分享 → 合订本」；iOS：快捷指令把分享内容经 `hedingben://` 深链送入 App |
+| 🔍 | **图片文字可搜** | 本地 OCR（macOS Vision / Windows WinRT / Android ML Kit / iOS Vision），中英文都认，图里的干货变成可搜索文本 |
 | 🧠 | **语义搜索** | 内置 e5 语义模型（int8，282MB，全离线），换种说法也能搜到 |
 | 🗂️ | **自动分类** | 按标题、正文、OCR 文本和标签打分，自动分到 9 个类目；纯规则表，改一个文件就能按自己的兴趣调整 |
 | 🖼️ | **配图本地化** | 图片下载到本机，原帖删除、限流、防盗链都不影响你已存的内容 |
@@ -247,6 +248,20 @@ cargo build --target aarch64-linux-android --features tauri/custom-protocol
 
 > Windows 下 tauri CLI 的 android 子命令有 symlink 与 android-studio-script 两个已知 bug，上面是绕过的全手动流程，详见 `CLAUDE.md`。
 
+### iOS
+
+```bash
+npm install
+npx next build --webpack       # 前端静态导出
+npx tauri ios init             # 生成 Xcode 工程（需要 macOS + Xcode 16+）
+node scripts/ios-info-plist.cjs
+npx tauri ios build --target aarch64-sim   # 模拟器构建，无需签名
+```
+
+- 仓库自带 CI（`.github/workflows/ios-build.yml`）：push 后在 macOS runner 上自动生成工程并构建模拟器 `.app`，产物在 Actions Artifacts 里可直接下载拖进本地模拟器运行
+- Rust 侧与 Android 共用同一套进程内 sidecar（`src-tauri/src/server/`），OCR 用 Apple Vision（`src/server/ocr_ios.rs`），随导入完成
+- 系统分享入口是 `hedingben://import?text=<URL 编码文本>` 深链——配合 iOS 快捷指令（接收共享表单输入 → 打开 URL）实现「分享到 合订本」
+
 ### Chrome 扩展（桌面端可选）
 
 1. Chrome 打开 `chrome://extensions`，右上角开启**开发者模式**
@@ -346,7 +361,8 @@ cargo test    # 在 src-tauri/ 下：Rust sidecar 移植 + HTTP 契约 + 集成�
 - **小红书改版会失效**：扩展的 DOM 选择器和页面状态解析规则依赖当前页面结构，改版后需要跟着更新
 - **匿名解析可能失败**：页面拒绝匿名访问时导入会报错。这是设计如此 —— 不会为了成功率去用你的登录态
 - **不支持批量**：一次一条，没有收藏夹同步。这也是故意的
-- **Android/iOS 语义模型较大**：内置 282MB e5 int8 模型，首启部署需要一点时间
+- **Android/iOS 语义模型较大**：内置 282MB e5 int8 模型，首启部署需要一点时间；iOS 包暂未内置该模型，语义搜索在这端回退为关键词搜索
+- **iOS 未含真机签名**：CI 产出模拟器构建；真机安装/上架需要你自己的 Apple 开发者证书，分享入口目前走深链 + 快捷指令（原生 Share Extension 是后续计划）
 - 桌面 Windows 安装包未签名（SmartScreen 可能提示）
 
 ## 📄 License
