@@ -77,3 +77,6 @@ public/models/
 # temp evidence logs
 f3-api.log
 *.log.tmp
+
+# packaged release artifacts (APK 超过 GitHub 单文件 100MB 限制，不进 git)
+/release
