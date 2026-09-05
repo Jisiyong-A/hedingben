@@ -1,8 +1,6 @@
-<div align="center">
-
-<img src=".github/assets/icon.png" width="120" alt="合订本" />
-
 # 合订本
+
+<div align="center">
 
 **专治收藏夹吃灰 —— 把小红书 / B 站你在意的那条内容，抄一份到自己设备上，这次真的找得回来。**
 
@@ -13,12 +11,6 @@
 <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri" />
 <img src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white" alt="Next.js" />
 <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License" />
-
-<br /><br />
-
-<img src=".github/assets/screenshot-desk.jpg" width="900" alt="首页整理台，笔记按类目自动分成卡片堆" />
-
-<sub>收藏进来的笔记按类目摊在整理台上，每个分组是一叠可以展开的卡片</sub>
 
 </div>
 
@@ -306,10 +298,6 @@ codex mcp add shoucang-notes \
 `编程开发` · `AI工具` · `阅读思考` · `设计美学` · `旅行户外` · `美食餐饮` · `影像创作` · `方法论` · `生活方式`
 
 规则是纯正则表格，写在 `scripts/lib/category-inference.mjs`，**按自己的兴趣改这个文件就行**，不需要训练也不需要模型。
-
-<div align="center">
-  <img src=".github/assets/screenshot-group.jpg" width="900" alt="展开分组后平铺的笔记卡片，每张带类目标签" />
-</div>
 
 ## 💾 数据存在哪
 
